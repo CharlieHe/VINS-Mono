@@ -341,13 +341,44 @@ PinholeCamera::imageHeight(void) const
     return mParameters.imageHeight();
 }
 
-void
-PinholeCamera::estimateIntrinsics(const cv::Size& boardSize,
+/**
+ * [PinholeCamera::estimateIntrinsics description]
+ * @param boardSize    [横纵方向角点个数]
+ * @param objectPoints [<(所有图像) <(单张图像)图像平面上角点的空间坐标(单位是mm，Z轴坐标为0)> >]
+ * @param imagePoints  [<(所有图像) <(单张图像)图像平面上角点的平面坐标> >]
+ * @Details
+ * 正常情况下的相机模型：
+ *     |u|   |fx  0  cx|           |X|
+ *    s|v| = |0  fy  cy| [r1 r2 t] |Y|         (1)
+ *     |1|   |0   0   1|           |Z|
+ * 在cx，cy已知的情况下对(1)做变换：
+ *     |u-ux|   |fx  0   0|           |X|
+ *    s|v-vx| = |0  fy   0| [r1 r2 t] |Y|      (2)
+ *     |  1 |   |0   0   1|           |Z|
+ * 即在(1)式的两端左乘矩阵A，A矩阵为：
+ *     |1 0 -cx|
+ * A = |0 1 -cy|
+ *     |0 0  1 |
+ * 参考张氏标定法论文Eq(2)，则(2)式对应的单应矩阵H'=TH   (3)
+ * 在(2)式下，论文Eq(5)中的矩阵B为：
+ *     | 1/fx*fx   0     0|
+ * B = |    0   1/fy*fy  0|
+ *     |    0      0     1|
+ *
+ * 最后依据论文Eq(8)中两个约束条件，利用两个约束条件即可求解出fx和fy.
+ * 或者将(2)式进行提取，写作:
+ *      |h1 h2 h3|   | r11fx  r12fx   t1fx |
+ * H' = |h4 h5 h6| = | r21fy  r22fy   t2fy |
+ *      |h7 h8 h9|   |  r31    r32     t3  |
+ * 然后提取出r1,r2，利用旋转矩阵的约束条件(论文2.3)求解方程。
+ */
+void PinholeCamera::estimateIntrinsics(const cv::Size& boardSize,
                                   const std::vector< std::vector<cv::Point3f> >& objectPoints,
                                   const std::vector< std::vector<cv::Point2f> >& imagePoints)
 {
     // Z. Zhang, A Flexible New Technique for Camera Calibration, PAMI 2000
 
+    //! Step1: 读取相机的初始化参数(相机名称，图像大小，内参和畸变系数)
     Parameters params = getParameters();
 
     params.k1() = 0.0;
@@ -355,18 +386,22 @@ PinholeCamera::estimateIntrinsics(const cv::Size& boardSize,
     params.p1() = 0.0;
     params.p2() = 0.0;
 
+    //! Step2:设定图像坐标系原点的平移了是图像大小的一半，是考虑到后面的优化？
     double cx = params.imageWidth() / 2.0;
     double cy = params.imageHeight() / 2.0;
     params.cx() = cx;
     params.cy() = cy;
 
+    //！图像张数
     size_t nImages = imagePoints.size();
 
     cv::Mat A(nImages * 2, 2, CV_64F);
     cv::Mat b(nImages * 2, 1, CV_64F);
 
+    //! Step3: 求取相机内参fx,fy.
     for (size_t i = 0; i < nImages; ++i)
     {
+        //! Step3.1: 获取单张图像的角点在图像平面的空间坐标
         const std::vector<cv::Point3f>& oPoints = objectPoints.at(i);
 
         std::vector<cv::Point2f> M(oPoints.size());
@@ -375,8 +410,10 @@ PinholeCamera::estimateIntrinsics(const cv::Size& boardSize,
             M.at(j) = cv::Point2f(oPoints.at(j).x, oPoints.at(j).y);
         }
 
+        //! Step3.2：求取单应性矩阵
         cv::Mat H = cv::findHomography(M, imagePoints.at(i));
 
+        //! Step3.2：对应Details中(3)式
         H.at<double>(0,0) -= H.at<double>(2,0) * cx;
         H.at<double>(0,1) -= H.at<double>(2,1) * cx;
         H.at<double>(0,2) -= H.at<double>(2,2) * cx;
@@ -391,11 +428,14 @@ PinholeCamera::estimateIntrinsics(const cv::Size& boardSize,
         {
             double t0 = H.at<double>(j,0);
             double t1 = H.at<double>(j,1);
-            h[j] = t0; v[j] = t1;
+            h[j] = t0; 
+            v[j] = t1;
             d1[j] = (t0 + t1) * 0.5;
             d2[j] = (t0 - t1) * 0.5;
-            n[0] += t0 * t0; n[1] += t1 * t1;
-            n[2] += d1[j] * d1[j]; n[3] += d2[j] * d2[j];
+            n[0] += t0 * t0; 
+            n[1] += t1 * t1;
+            n[2] += d1[j] * d1[j];
+            n[3] += d2[j] * d2[j];
         }
 
         for (int j = 0; j < 4; ++j)
@@ -446,26 +486,35 @@ PinholeCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
  * \param p image coordinates
  * \param P coordinates of the projective ray
  */
-void
-PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
+/**
+ * [PinholeCamera::liftProjective 将图像平面的像素点投影到相机归一化平面上]
+ * @param p [像素点]
+ * @param P [归一化平面的3D点]
+ */
+void PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
 {
     double mx_d, my_d,mx2_d, mxy_d, my2_d, mx_u, my_u;
     double rho2_d, rho4_d, radDist_d, Dx_d, Dy_d, inv_denom_d;
     //double lambda;
 
+    //! 根据针孔相机模型和像素坐标，计算归一化平面坐标
     // Lift points to normalised plane
     mx_d = m_inv_K11 * p(0) + m_inv_K13;
     my_d = m_inv_K22 * p(1) + m_inv_K23;
 
+    //! 不考虑相机畸变
     if (m_noDistortion)
     {
         mx_u = mx_d;
         my_u = my_d;
     }
+
+    //! 考虑相机畸变
     else
     {
         if (0)
         {
+            //! 参考：http://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
             double k1 = mParameters.k1();
             double k2 = mParameters.k2();
             double p1 = mParameters.p1();
@@ -473,6 +522,8 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
 
             // Apply inverse distortion model
             // proposed by Heikkila
+            //! 使用逆向畸变模型 
+            //! 参考：Metrics T. Geometric Camera Calibration Using Circular Control Points.
             mx2_d = mx_d*mx_d;
             my2_d = my_d*my_d;
             mxy_d = mx_d*my_d;
@@ -489,6 +540,8 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
         else
         {
             // Recursive distortion model
+            //！使用正向递归畸变模型 
+            //！Question：这个地方的递归次数有什么说法么？
             int n = 8;
             Eigen::Vector2d d_u;
             distortion(Eigen::Vector2d(mx_d, my_d), d_u);
@@ -516,8 +569,12 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
  * \param P 3D point coordinates
  * \param p return value, contains the image point coordinates
  */
-void
-PinholeCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p) const
+/**
+ * [PinholeCamera::spaceToPlane 将相机坐标系下的3D点投影到图像平面上]
+ * @param P [3D点]
+ * @param p [像素点]
+ */
+void PinholeCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p) const
 {
     Eigen::Vector2d p_u, p_d;
 
@@ -614,8 +671,12 @@ PinholeCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p,
  * \param p_u 2D point coordinates
  * \return image point coordinates
  */
-void
-PinholeCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p) const
+/**
+ * [PinholeCamera::undistToPlane 将归一化相机平面上的点投影到图像平面上]
+ * @param p_u [description]
+ * @param p   [description]
+ */
+void PinholeCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p) const
 {
     Eigen::Vector2d p_d;
 
@@ -642,8 +703,12 @@ PinholeCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p) con
  * \param p_u undistorted coordinates of point on the normalised plane
  * \return to obtain the distorted point: p_d = p_u + d_u
  */
-void
-PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u) const
+/**
+ * [PinholeCamera::distortion 相机递归畸变的递归项]
+ * @param p_u [畸变前坐标]
+ * @param d_u [发生的畸变量]
+ */
+void PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u) const
 {
     double k1 = mParameters.k1();
     double k2 = mParameters.k2();
@@ -668,8 +733,13 @@ PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u) cons
  * \param p_u undistorted coordinates of point on the normalised plane
  * \return to obtain the distorted point: p_d = p_u + d_u
  */
-void
-PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u,
+/**
+ * [PinholeCamera::distortion 计算畸变量和雅克比矩阵]
+ * @param p_u [原始坐标]
+ * @param d_u [畸变量]
+ * @param J   [雅克比矩阵]
+ */
+void PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u,
                           Eigen::Matrix2d& J) const
 {
     double k1 = mParameters.k1();
@@ -696,8 +766,13 @@ PinholeCamera::distortion(const Eigen::Vector2d& p_u, Eigen::Vector2d& d_u,
          dydmx, dydmy;
 }
 
-void
-PinholeCamera::initUndistortMap(cv::Mat& map1, cv::Mat& map2, double fScale) const
+/**
+ * [PinholeCamera::initUndistortMap 构建在尺度fScale下的畸变查找表]
+ * @param map1   [description]
+ * @param map2   [description]
+ * @param fScale [description]
+ */
+void PinholeCamera::initUndistortMap(cv::Mat& map1, cv::Mat& map2, double fScale) const
 {
     cv::Size imageSize(mParameters.imageWidth(), mParameters.imageHeight());
 
@@ -708,6 +783,7 @@ PinholeCamera::initUndistortMap(cv::Mat& map1, cv::Mat& map2, double fScale) con
     {
         for (int u = 0; u < imageSize.width; ++u)
         {
+            //! 进行尺度变换和反向投影到相机的归一化平面上
             double mx_u = m_inv_K11 / fScale * u + m_inv_K13 / fScale;
             double my_u = m_inv_K22 / fScale * v + m_inv_K23 / fScale;
 
@@ -725,8 +801,19 @@ PinholeCamera::initUndistortMap(cv::Mat& map1, cv::Mat& map2, double fScale) con
     cv::convertMaps(mapX, mapY, map1, map2, CV_32FC1, false);
 }
 
-cv::Mat
-PinholeCamera::initUndistortRectifyMap(cv::Mat& map1, cv::Mat& map2,
+/**
+ * [PinholeCamera::initUndistortRectifyMap 构建指定内参的畸变查找表]
+ * @param  map1      [description]
+ * @param  map2      [description]
+ * @param  fx        [description]
+ * @param  fy        [description]
+ * @param  imageSize [description]
+ * @param  cx        [description]
+ * @param  cy        [description]
+ * @param  rmat      [可选择的一个旋转变换]
+ * @return           [description]
+ */
+cv::Mat PinholeCamera::initUndistortRectifyMap(cv::Mat& map1, cv::Mat& map2,
                                        float fx, float fy,
                                        cv::Size imageSize,
                                        float cx, float cy,
@@ -804,8 +891,7 @@ PinholeCamera::getParameters(void) const
     return mParameters;
 }
 
-void
-PinholeCamera::setParameters(const PinholeCamera::Parameters& parameters)
+void PinholeCamera::setParameters(const PinholeCamera::Parameters& parameters)
 {
     mParameters = parameters;
 
@@ -827,8 +913,7 @@ PinholeCamera::setParameters(const PinholeCamera::Parameters& parameters)
     m_inv_K23 = -mParameters.cy() / mParameters.fy();
 }
 
-void
-PinholeCamera::readParameters(const std::vector<double>& parameterVec)
+void PinholeCamera::readParameters(const std::vector<double>& parameterVec)
 {
     if ((int)parameterVec.size() != parameterCount())
     {
@@ -849,8 +934,7 @@ PinholeCamera::readParameters(const std::vector<double>& parameterVec)
     setParameters(params);
 }
 
-void
-PinholeCamera::writeParameters(std::vector<double>& parameterVec) const
+void PinholeCamera::writeParameters(std::vector<double>& parameterVec) const
 {
     parameterVec.resize(parameterCount());
     parameterVec.at(0) = mParameters.k1();
@@ -863,14 +947,12 @@ PinholeCamera::writeParameters(std::vector<double>& parameterVec) const
     parameterVec.at(7) = mParameters.cy();
 }
 
-void
-PinholeCamera::writeParametersToYamlFile(const std::string& filename) const
+void PinholeCamera::writeParametersToYamlFile(const std::string& filename) const
 {
     mParameters.writeToYamlFile(filename);
 }
 
-std::string
-PinholeCamera::parametersToString(void) const
+std::string PinholeCamera::parametersToString(void) const
 {
     std::ostringstream oss;
     oss << mParameters;

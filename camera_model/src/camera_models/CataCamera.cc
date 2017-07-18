@@ -29,6 +29,19 @@ CataCamera::Parameters::Parameters()
 
 }
 
+/**
+ * 广角相机MEI投影模型模型：
+ * 1.投影到归一化平面
+ * z = P(2) + xi*P.norm()
+ * m = [P(0)/z, P(1)/z, 1]
+ * 2.利用投影模型，投影到归一化平面
+ *          | γ1 0  u0 |
+ * p = Km = | 0  γ2 v0 |m
+ *          | 0  0  1  |
+ * 其中m是相机归一化平面上的点
+ *
+ * 参考：http://www.robots.ox.ac.uk/~cmei/articles/projection_model.pdf
+ */
 CataCamera::Parameters::Parameters(const std::string& cameraName,
                                    int w, int h,
                                    double xi,
@@ -369,13 +382,20 @@ CataCamera::imageHeight(void) const
     return mParameters.imageHeight();
 }
 
-void
-CataCamera::estimateIntrinsics(const cv::Size& boardSize,
+/**
+ * [CataCamera::estimateIntrinsics 内参估计]
+ * @param boardSize    [横纵方向角点个数]
+ * @param objectPoints [角点空间坐标]
+ * @param imagePoints  [角点像素坐标]
+ */
+void CataCamera::estimateIntrinsics(const cv::Size& boardSize,
                                const std::vector< std::vector<cv::Point3f> >& objectPoints,
                                const std::vector< std::vector<cv::Point2f> >& imagePoints)
 {
+    //! Step1: 读取相机的初始化参数(相机名称，图像大小，内参和畸变系数)
     Parameters params = getParameters();
 
+    //! Step2:设定图像坐标系原点的平移了是图像大小的一半
     double u0 = params.imageWidth() / 2.0;
     double v0 = params.imageHeight() / 2.0;
 
@@ -396,10 +416,15 @@ CataCamera::estimateIntrinsics(const cv::Size& boardSize,
 
     // Initialize gamma (focal length)
     // Use non-radial line image and xi = 1
+    // //! Step3: 求取相机内参fx,fy.
+    //！每一张图像会得到一个内参，然后取重投影误差最小的 
     for (size_t i = 0; i < imagePoints.size(); ++i)
     {
         for (int r = 0; r < boardSize.height; ++r)
         {
+            //! 参考论文：Single View Point Omnidirectional Camera Calibration from Planar Grids
+            //! IV.B部分，对焦距的估计
+            //! Step3.1：计算相机投影矩阵P
             cv::Mat P(boardSize.width, 4, CV_64F);
             for (int c = 0; c < boardSize.width; ++c)
             {
@@ -414,6 +439,7 @@ CataCamera::estimateIntrinsics(const cv::Size& boardSize,
                 P.at<double>(c, 3) = -0.5 * (square(u) + square(v));
             }
 
+            //! Step3.2：根据PC=0，SCD分解得到C矩阵
             cv::Mat C;
             cv::SVD::solveZ(P, C);
 
@@ -423,6 +449,8 @@ CataCamera::estimateIntrinsics(const cv::Size& boardSize,
                 continue;
             }
 
+            //! Step3.3：判断线图像是否为经向的？
+            //! question：读论文，这部分怎么理解？
             // check that line image is not radial
             double d = sqrt(1.0 / t);
             double nx = C.at<double>(0) * d;
@@ -432,19 +460,24 @@ CataCamera::estimateIntrinsics(const cv::Size& boardSize,
                 continue;
             }
 
+            //! Step3.4：计算得到γ
             double gamma = sqrt(C.at<double>(2) / C.at<double>(3));
 
             params.gamma1() = gamma;
             params.gamma2() = gamma;
             setParameters(params);
 
+            //! Step4: 估计外参
+            //! 这个地方外参没必要重复计算这么多次吧？放在最前面计算就可以吧
             for (size_t j = 0; j < objectPoints.size(); ++j)
             {
                 estimateExtrinsics(objectPoints.at(j), imagePoints.at(j), rvecs.at(j), tvecs.at(j));
             }
 
+            //! Spep5: 计算重投影误差
             double reprojErr = reprojectionError(objectPoints, imagePoints, rvecs, tvecs, cv::noArray());
 
+            //! Step6: 挑选重投影误差最小的内参
             if (reprojErr < minReprojErr)
             {
                 minReprojErr = reprojErr;
@@ -472,14 +505,19 @@ CataCamera::estimateIntrinsics(const cv::Size& boardSize,
  * \param p image coordinates
  * \param P coordinates of the point on the sphere
  */
-void
-CataCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
+/**
+ * [CataCamera::liftSphere 将图像平面上的像素点投影到单位球面上]
+ * @param p [像素点]
+ * @param P [3D坐标点]
+ */
+void CataCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
 {
     double mx_d, my_d,mx2_d, mxy_d, my2_d, mx_u, my_u;
     double rho2_d, rho4_d, radDist_d, Dx_d, Dy_d, inv_denom_d;
     double lambda;
 
     // Lift points to normalised plane
+    //！Step1：利用投影模型反投影到归一化平面上 
     mx_d = m_inv_K11 * p(0) + m_inv_K13;
     my_d = m_inv_K22 * p(1) + m_inv_K23;
 
@@ -488,8 +526,10 @@ CataCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
         mx_u = mx_d;
         my_u = my_d;
     }
+    //！Step2：加入畸变量
     else
     {
+        //! 畸变模型和针孔相机的类似
         // Apply inverse distortion model
         if (0)
         {
@@ -533,6 +573,8 @@ CataCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
     }
 
     // Lift normalised points to the sphere (inv_hslash)
+    //！将归一化平面上的点转换到单位球面上
+    //！参考论文Eq(2)
     double xi = mParameters.xi();
     if (xi == 1.0)
     {
@@ -552,14 +594,19 @@ CataCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
  * \param p image coordinates
  * \param P coordinates of the projective ray
  */
-void
-CataCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
+/**
+ * [CataCamera::liftProjective 得到像素点对应的投影射线]
+ * @param p [description]
+ * @param P [description]
+ */
+void CataCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
 {
     double mx_d, my_d,mx2_d, mxy_d, my2_d, mx_u, my_u;
     double rho2_d, rho4_d, radDist_d, Dx_d, Dy_d, inv_denom_d;
     //double lambda;
 
     // Lift points to normalised plane
+    //！反向投影到归一化平面上
     mx_d = m_inv_K11 * p(0) + m_inv_K13;
     my_d = m_inv_K22 * p(1) + m_inv_K23;
 
@@ -620,6 +667,7 @@ CataCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
     else
     {
         // Reuse variable
+        //！question：这个地方的公式是怎么推的 
         rho2_d = mx_u * mx_u + my_u * my_u;
         P << mx_u, my_u, 1.0 - xi * (rho2_d + 1.0) / (xi + sqrt(1.0 + (1.0 - xi * xi) * rho2_d));
     }
@@ -632,8 +680,12 @@ CataCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
  * \param P 3D point coordinates
  * \param p return value, contains the image point coordinates
  */
-void
-CataCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p) const
+/**
+ * [CataCamera::spaceToPlane 将空间3D点投影到图像平面上]
+ * @param P [description]
+ * @param p [description]
+ */
+void CataCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p) const
 {
     Eigen::Vector2d p_u, p_d;
 
@@ -734,8 +786,12 @@ CataCamera::spaceToPlane(const Eigen::Vector3d& P, Eigen::Vector2d& p,
  * \param p_u 2D point coordinates
  * \return image point coordinates
  */
-void
-CataCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p) const
+/**
+ * [CataCamera::undistToPlane 将归一化相机平面上的点投影到图像平面上]
+ * @param p_u [description]
+ * @param p   [description]
+ */
+void CataCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p) const
 {
     Eigen::Vector2d p_d;
 

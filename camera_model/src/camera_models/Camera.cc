@@ -6,6 +6,7 @@
 namespace camodocal
 {
 
+//! 初始化相机模型
 Camera::Parameters::Parameters(ModelType modelType)
  : m_modelType(modelType)
  , m_imageWidth(0)
@@ -28,6 +29,7 @@ Camera::Parameters::Parameters(ModelType modelType)
     }
 }
 
+//! 初始化相机模型和图像大小
 Camera::Parameters::Parameters(ModelType modelType,
                                const std::string& cameraName,
                                int w, int h)
@@ -119,14 +121,21 @@ Camera::mask(void) const
     return m_mask;
 }
 
-void
-Camera::estimateExtrinsics(const std::vector<cv::Point3f>& objectPoints,
+/**
+ * [Camera::estimateExtrinsics 相机外参估计]
+ * @param objectPoints [空间3D点]
+ * @param imagePoints  [图像像素点]
+ * @param rvec         [相机外参旋转]
+ * @param tvec         [相机外参平移]
+ */
+void Camera::estimateExtrinsics(const std::vector<cv::Point3f>& objectPoints,
                            const std::vector<cv::Point2f>& imagePoints,
                            cv::Mat& rvec, cv::Mat& tvec) const
 {
     std::vector<cv::Point2f> Ms(imagePoints.size());
     for (size_t i = 0; i < Ms.size(); ++i)
     {
+        //! 获取相机在归一化平面的坐标
         Eigen::Vector3d P;
         liftProjective(Eigen::Vector2d(imagePoints.at(i).x, imagePoints.at(i).y), P);
 
@@ -137,11 +146,17 @@ Camera::estimateExtrinsics(const std::vector<cv::Point3f>& objectPoints,
     }
 
     // assume unit focal length, zero principal point, and zero distortion
+    //！假设内参矩阵是单位阵，求取相机的外参 
     cv::solvePnP(objectPoints, Ms, cv::Mat::eye(3, 3, CV_64F), cv::noArray(), rvec, tvec);
 }
 
-double
-Camera::reprojectionDist(const Eigen::Vector3d& P1, const Eigen::Vector3d& P2) const
+/**
+ * [Camera::reprojectionDist 求取相机坐标系下两个3D点的重投影距离]
+ * @param  P1 [3D点]
+ * @param  P2 [3D点]
+ * @return    [重投影距离]
+ */
+double Camera::reprojectionDist(const Eigen::Vector3d& P1, const Eigen::Vector3d& P2) const
 {
     Eigen::Vector2d p1, p2;
 
@@ -151,8 +166,16 @@ Camera::reprojectionDist(const Eigen::Vector3d& P1, const Eigen::Vector3d& P2) c
     return (p1 - p2).norm();
 }
 
-double
-Camera::reprojectionError(const std::vector< std::vector<cv::Point3f> >& objectPoints,
+/**
+ * [Camera::reprojectionError 计算重投影误差,主要是用在相机校准当中]
+ * @param  objectPoints   [空间3D点]
+ * @param  imagePoints    [图像像素点]
+ * @param  rvecs          [相机位置]
+ * @param  tvecs          [相机姿态]
+ * @param  _perViewErrors [单张图像的误差均值]
+ * @return                [得到的重投影误差]
+ */
+double Camera::reprojectionError(const std::vector< std::vector<cv::Point3f> >& objectPoints,
                           const std::vector< std::vector<cv::Point2f> >& imagePoints,
                           const std::vector<cv::Mat>& rvecs,
                           const std::vector<cv::Mat>& tvecs,
@@ -162,6 +185,7 @@ Camera::reprojectionError(const std::vector< std::vector<cv::Point3f> >& objectP
     size_t pointsSoFar = 0;
     double totalErr = 0.0;
 
+    //! 判断该输出的矩阵是否需要计算
     bool computePerViewErrors = _perViewErrors.needed();
     cv::Mat perViewErrors;
     if (computePerViewErrors)
@@ -176,16 +200,19 @@ Camera::reprojectionError(const std::vector< std::vector<cv::Point3f> >& objectP
 
         pointsSoFar += pointCount;
 
+        //！计算由相机位姿和空间3D点投影后的像素点
         std::vector<cv::Point2f> estImagePoints;
         projectPoints(objectPoints.at(i), rvecs.at(i), tvecs.at(i),
                       estImagePoints);
 
+        //！计算误差
         double err = 0.0;
         for (size_t j = 0; j < imagePoints.at(i).size(); ++j)
         {
             err += cv::norm(imagePoints.at(i).at(j) - estImagePoints.at(j));
         }
 
+        //! 计算单张图像的误差均值
         if (computePerViewErrors)
         {
             perViewErrors.at<double>(i) = err / pointCount;
@@ -197,8 +224,15 @@ Camera::reprojectionError(const std::vector< std::vector<cv::Point3f> >& objectP
     return totalErr / pointsSoFar;
 }
 
-double
-Camera::reprojectionError(const Eigen::Vector3d& P,
+/**
+ * [Camera::reprojectionError 世界单个3D点的重投影误差计算]
+ * @param  P          [空间3D点]
+ * @param  camera_q   [相机姿态]
+ * @param  camera_t   [相机位置]
+ * @param  observed_p [图像像素点]
+ * @return            [重投影误差]
+ */
+double Camera::reprojectionError(const Eigen::Vector3d& P,
                           const Eigen::Quaterniond& camera_q,
                           const Eigen::Vector3d& camera_t,
                           const Eigen::Vector2d& observed_p) const
@@ -211,8 +245,14 @@ Camera::reprojectionError(const Eigen::Vector3d& P,
     return (p - observed_p).norm();
 }
 
-void
-Camera::projectPoints(const std::vector<cv::Point3f>& objectPoints,
+/**
+ * [Camera::projectPoints 将世界坐标系的3D点投影到图像平面上]
+ * @param objectPoints [3D坐标点]
+ * @param rvec         [相机姿态]
+ * @param tvec         [相机位置]
+ * @param imagePoints  [投影后的像素点]
+ */
+void Camera::projectPoints(const std::vector<cv::Point3f>& objectPoints,
                       const cv::Mat& rvec,
                       const cv::Mat& tvec,
                       std::vector<cv::Point2f>& imagePoints) const
@@ -221,6 +261,7 @@ Camera::projectPoints(const std::vector<cv::Point3f>& objectPoints,
     imagePoints.reserve(objectPoints.size());
 
     //double
+    //！ 将旋转向量转为旋转矩阵
     cv::Mat R0;
     cv::Rodrigues(rvec, R0);
 
@@ -236,12 +277,14 @@ Camera::projectPoints(const std::vector<cv::Point3f>& objectPoints,
     {
         const cv::Point3f& objectPoint = objectPoints.at(i);
 
+        //! 转到相机坐标系
         // Rotate and translate
         Eigen::Vector3d P;
         P << objectPoint.x, objectPoint.y, objectPoint.z;
 
         P = R * P + t;
 
+        //! 根据内参投影到图像平面
         Eigen::Vector2d p;
         spaceToPlane(P, p);
 

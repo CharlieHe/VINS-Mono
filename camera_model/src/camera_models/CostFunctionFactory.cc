@@ -497,8 +497,7 @@ CostFunctionFactory::instance(void)
     return m_instance;
 }
 
-ceres::CostFunction*
-CostFunctionFactory::generateCostFunction(const CameraConstPtr& camera,
+ceres::CostFunction* CostFunctionFactory::generateCostFunction(const CameraConstPtr& camera,
         const Eigen::Vector3d& observed_P,
         const Eigen::Vector2d& observed_p,
         int flags) const

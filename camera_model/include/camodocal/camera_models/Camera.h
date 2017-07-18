@@ -13,6 +13,12 @@ class Camera
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    //! 相机模型：
+    //! KANNALA_BRANDT：J. Kannala, and S. Brandt, A Generic Camera Model and Calibration Method for Conventional, Wide-Angle, and Fish-Eye Lenses, PAMI 2006
+    //! MEI：Single View Point Omnidirectional Camera Calibration from Planar Grids
+    //! PINHOLE：针孔相机模型
+    //! SCARAMUZZA：OCamCalib: Omnidirectional Camera Calibration Toolbox for Matlab
     enum ModelType
     {
         KANNALA_BRANDT,

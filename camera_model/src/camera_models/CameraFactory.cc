@@ -31,8 +31,14 @@ CameraFactory::instance(void)
     return m_instance;
 }
 
-CameraPtr
-CameraFactory::generateCamera(Camera::ModelType modelType,
+/**
+ * [CameraFactory::generateCamera 配置相机校准模型参数]
+ * @param  modelType  [相机模型]
+ * @param  cameraName [相机名字]
+ * @param  imageSize  [图像大小]
+ * @return            [返回对应的相机校准模型]
+ */
+CameraPtr CameraFactory::generateCamera(Camera::ModelType modelType,
                               const std::string& cameraName,
                               cv::Size imageSize) const
 {

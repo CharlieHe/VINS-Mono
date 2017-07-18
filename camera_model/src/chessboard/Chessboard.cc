@@ -27,8 +27,11 @@ Chessboard::Chessboard(cv::Size boardSize, cv::Mat& image)
     }
 }
 
-void
-Chessboard::findCorners(bool useOpenCV)
+/**
+ * [Chessboard::findCorners 使用opencv的方法检测并绘制角点]
+ * @param useOpenCV [description]
+ */
+void Chessboard::findCorners(bool useOpenCV)
 {
     mCornersFound = findChessboardCorners(mImage, mBoardSize, mCorners,
                                           CV_CALIB_CB_ADAPTIVE_THRESH +

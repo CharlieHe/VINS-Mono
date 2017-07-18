@@ -155,8 +155,9 @@ void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
     m_buf.lock();
     imu_buf.push(imu_msg);
     m_buf.unlock();
-    con.notify_one();
 
+    //! 唤醒某个线程
+    con.notify_one();
     {
         std::lock_guard<std::mutex> lg(m_state);
         predict(imu_msg);

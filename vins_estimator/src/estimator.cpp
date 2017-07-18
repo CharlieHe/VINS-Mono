@@ -25,6 +25,8 @@ void Estimator::clearState()
         Rs[i].setIdentity();
         Ps[i].setZero();
         Vs[i].setZero();
+
+        //! IMU初始的Bias都是设为0的
         Bas[i].setZero();
         Bgs[i].setZero();
         dt_buf[i].clear();

@@ -29,6 +29,14 @@ CameraCalibration::CameraCalibration()
 
 }
 
+/**
+ * [CameraCalibration       相机校准构造函数]
+ * @param modelType         [相机类型]
+ * @param cameraName        [相机名称]
+ * @param imageSize         [图像大小]
+ * @param boardSize         [标定板x，y方向角点的数目]
+ * @param squareSize        [正方形的大小(mm)]
+ */
 CameraCalibration::CameraCalibration(const Camera::ModelType modelType,
                                      const std::string& cameraName,
                                      const cv::Size& imageSize,
@@ -41,18 +49,24 @@ CameraCalibration::CameraCalibration(const Camera::ModelType modelType,
     m_camera = CameraFactory::instance()->generateCamera(modelType, cameraName, imageSize);
 }
 
-void
-CameraCalibration::clear(void)
+/**
+ * [CameraCalibration::clear description]
+ */
+void CameraCalibration::clear(void)
 {
     m_imagePoints.clear();
     m_scenePoints.clear();
 }
 
-void
-CameraCalibration::addChessboardData(const std::vector<cv::Point2f>& corners)
+/**
+ * [CameraCalibration::addChessboardData 存入检测到的角点，等待下一步的校准]
+ * @param corners [description]
+ */
+void CameraCalibration::addChessboardData(const std::vector<cv::Point2f>& corners)
 {
     m_imagePoints.push_back(corners);
 
+    //! 存入图像上每一个角点的坐标(mm)
     std::vector<cv::Point3f> scenePointsInView;
     for (int i = 0; i < m_boardSize.height; ++i)
     {
@@ -61,11 +75,15 @@ CameraCalibration::addChessboardData(const std::vector<cv::Point2f>& corners)
             scenePointsInView.push_back(cv::Point3f(i * m_squareSize, j * m_squareSize, 0.0));
         }
     }
+    //! 存入多张图像中，一张图像的所有角点
     m_scenePoints.push_back(scenePointsInView);
 }
 
-bool
-CameraCalibration::calibrate(void)
+/**
+ * [CameraCalibration::calibrate 相机校准主程序]
+ * @return  [description]
+ */
+bool CameraCalibration::calibrate(void)
 {
     int imageCount = m_imagePoints.size();
 
@@ -421,17 +439,26 @@ CameraCalibration::setVerbose(bool verbose)
     m_verbose = verbose;
 }
 
-bool
-CameraCalibration::calibrateHelper(CameraPtr& camera,
+/**
+ * [CameraCalibration::calibrateHelper description]
+ * @param  camera [使用的相机模型]
+ * @param  rvecs  [相机外参之旋转]
+ * @param  tvecs  [相机外参之平移]
+ * @return        [description]
+ */
+bool CameraCalibration::calibrateHelper(CameraPtr& camera,
                                    std::vector<cv::Mat>& rvecs, std::vector<cv::Mat>& tvecs) const
 {
+    //! 不同视角之下的外参
     rvecs.assign(m_scenePoints.size(), cv::Mat());
     tvecs.assign(m_scenePoints.size(), cv::Mat());
 
     // STEP 1: Estimate intrinsics
+    //！Step1：内参估计 
     camera->estimateIntrinsics(m_boardSize, m_scenePoints, m_imagePoints);
 
     // STEP 2: Estimate extrinsics
+    //！Step2：外参估计 
     for (size_t i = 0; i < m_scenePoints.size(); ++i)
     {
         camera->estimateExtrinsics(m_scenePoints.at(i), m_imagePoints.at(i), rvecs.at(i), tvecs.at(i));
@@ -447,6 +474,7 @@ CameraCalibration::calibrateHelper(CameraPtr& camera,
     }
 
     // STEP 3: optimization using ceres
+    //！Step 3：在当前内外参的基础之上做优化
     optimize(camera, rvecs, tvecs);
 
     if (m_verbose)
@@ -461,13 +489,19 @@ CameraCalibration::calibrateHelper(CameraPtr& camera,
     return true;
 }
 
-void
-CameraCalibration::optimize(CameraPtr& camera,
+/**
+ * [CameraCalibration::optimize description]
+ * @param camera [相机]
+ * @param rvecs  [相机外参之旋转]
+ * @param tvecs  [相机外参之平移]
+ */
+void CameraCalibration::optimize(CameraPtr& camera,
                             std::vector<cv::Mat>& rvecs, std::vector<cv::Mat>& tvecs) const
 {
     // Use ceres to do optimization
     ceres::Problem problem;
 
+    //！Step1：将旋转矩阵和平移矩阵整合为转移矩阵
     std::vector<Transform, Eigen::aligned_allocator<Transform> > transformVec(rvecs.size());
     for (size_t i = 0; i < rvecs.size(); ++i)
     {

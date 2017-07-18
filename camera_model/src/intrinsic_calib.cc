@@ -155,10 +155,14 @@ int main(int argc, char** argv)
     calibration.setVerbose(verbose);
 
     std::vector<bool> chessboardFound(imageFilenames.size(), false);
+
+    //! 处理单幅图像
     for (size_t i = 0; i < imageFilenames.size(); ++i)
     {
+        //! Step1：读取棋盘格照片
         image = cv::imread(imageFilenames.at(i), -1);
 
+        //! Step2：初始化检测角点的棋盘格
         camodocal::Chessboard chessboard(boardSize, image);
 
         chessboard.findCorners(useOpenCV);
@@ -169,6 +173,7 @@ int main(int argc, char** argv)
                 std::cerr << "# INFO: Detected chessboard in image " << i + 1 << ", " << imageFilenames.at(i) << std::endl;
             }
 
+            //! Step3：添加在图像上检测到的角点
             calibration.addChessboardData(chessboard.getCorners());
 
             cv::Mat sketch;
@@ -181,10 +186,12 @@ int main(int argc, char** argv)
         {
             std::cerr << "# INFO: Did not detect chessboard in image " << i + 1 << std::endl;
         }
+        //! 添加角点检测标志位
         chessboardFound.at(i) = chessboard.cornersFound();
     }
     cv::destroyWindow("Image");
 
+    //! 有效的棋盘格图像数少于10张，则不能用于校准
     if (calibration.sampleCount() < 10)
     {
         std::cerr << "# ERROR: Insufficient number of detected chessboards." << std::endl;

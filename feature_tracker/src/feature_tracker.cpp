@@ -84,6 +84,7 @@ void FeatureTracker::readImage(const cv::Mat &_img)
 
     if (EQUALIZE)
     {
+        //! 利用自适应直方图均衡算法对图像做增强处理
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
         TicToc t_c;
         clahe->apply(_img, img);
@@ -162,6 +163,9 @@ void FeatureTracker::readImage(const cv::Mat &_img)
     cur_pts = forw_pts;
 }
 
+/**
+ * [FeatureTracker::rejectWithF description]
+ */
 void FeatureTracker::rejectWithF()
 {
     if (forw_pts.size() >= 8)

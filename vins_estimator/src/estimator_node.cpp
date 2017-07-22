@@ -61,7 +61,12 @@ std_msgs::Header cur_header;
 Eigen::Vector3d relocalize_t{Eigen::Vector3d(0, 0, 0)};
 Eigen::Matrix3d relocalize_r{Eigen::Matrix3d::Identity()};
 
-
+/**
+ * [predict 对单次的IMU测量值做积分得到位移和姿态
+ * question：这个地方是为了增加系统位姿的输出频率？
+ * ]
+ * @param imu_msg [采样时间内单次IMU测量值]
+ */
 void predict(const sensor_msgs::ImuConstPtr &imu_msg)
 {
     double t = imu_msg->header.stamp.toSec();
@@ -78,6 +83,7 @@ void predict(const sensor_msgs::ImuConstPtr &imu_msg)
     double rz = imu_msg->angular_velocity.z;
     Eigen::Vector3d angular_velocity{rx, ry, rz};
 
+    //! 这个地方的tmp_Q是local-->world
     Eigen::Vector3d un_acc_0 = tmp_Q * (acc_0 - tmp_Ba - tmp_Q.inverse() * estimator.g);
 
     Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - tmp_Bg;
@@ -112,8 +118,10 @@ void update()
 
 }
 
-std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>>
-getMeasurements()
+/**
+ * 获取Feature和IMU的测量值，这里做了简单的一个对齐
+ */
+std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> getMeasurements()
 {
     std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> measurements;
 
@@ -122,6 +130,7 @@ getMeasurements()
         if (imu_buf.empty() || feature_buf.empty())
             return measurements;
 
+        //! 如果最新的IMU的数据时间戳小于特征点的时间戳，则等待IMU刷新
         if (!(imu_buf.back()->header.stamp > feature_buf.front()->header.stamp))
         {
             ROS_WARN("wait for imu, only should happen at the beginning");
@@ -129,6 +138,7 @@ getMeasurements()
             return measurements;
         }
 
+        //! 如果最旧的IMU数据的时间戳大于最旧特征时间戳，则弹出旧图像
         if (!(imu_buf.front()->header.stamp < feature_buf.front()->header.stamp))
         {
             ROS_WARN("throw img, only should happen at the beginning");
@@ -138,6 +148,8 @@ getMeasurements()
         sensor_msgs::PointCloudConstPtr img_msg = feature_buf.front();
         feature_buf.pop();
 
+        //! 这里IMU和Feature做了简单的对齐，确保IMU的时间戳是小于图像的
+        //! 在IMU buff中的时间戳小于特征点的都和该帧特征联合存入
         std::vector<sensor_msgs::ImuConstPtr> IMUs;
         while (imu_buf.front()->header.stamp <= img_msg->header.stamp)
         {
@@ -150,6 +162,10 @@ getMeasurements()
     return measurements;
 }
 
+/**
+ * [imu_callback IMU测量的回调函数]
+ * @param imu_msg [接受到的IMU消息]
+ */
 void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
 {
     m_buf.lock();
@@ -168,6 +184,10 @@ void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
     }
 }
 
+/**
+ * [raw_image_callback 图像回调函数，只有进行闭环检测的时候才用到图像]
+ * @param img_msg [回调的图像]
+ */
 void raw_image_callback(const sensor_msgs::ImageConstPtr &img_msg)
 {
     cv_bridge::CvImagePtr img_ptr = cv_bridge::toCvCopy(img_msg, sensor_msgs::image_encodings::MONO8);
@@ -180,6 +200,10 @@ void raw_image_callback(const sensor_msgs::ImageConstPtr &img_msg)
     }
 }
 
+/**
+ * [feature_callback 关键点回调函数]
+ * @param feature_msg [订阅的关键点]
+ */
 void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
 {
     m_buf.lock();
@@ -188,6 +212,10 @@ void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
     con.notify_one();
 }
 
+/**
+ * [send_imu 发送IMU数据到预积分环节]
+ * @param imu_msg [IMU数据]
+ */
 void send_imu(const sensor_msgs::ImuConstPtr &imu_msg)
 {
     double t = imu_msg->header.stamp.toSec();
@@ -441,7 +469,8 @@ void process()
 {
     while (true)
     {
-        std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> measurements;
+        //! 单帧图像对应多帧IMU数据的结构
+        std::vector<std::pair< std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr> > measurements;
         std::unique_lock<std::mutex> lk(m_buf);
         con.wait(lk, [&]
                  {
@@ -461,6 +490,7 @@ void process()
             map<int, vector<pair<int, Vector3d>>> image;
             for (unsigned int i = 0; i < img_msg->points.size(); i++)
             {
+                //! 
                 int v = img_msg->channels[0].values[i] + 0.5;
                 int feature_id = v / NUM_OF_CAM;
                 int camera_id = v % NUM_OF_CAM;

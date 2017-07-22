@@ -30,10 +30,12 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     }
 
     // frequency control
+    //! Step1：控制图像输入频率，这个地方是一个平均值
     if (round(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time)) <= FREQ)
     {
         PUB_THIS_FRAME = true;
         // reset the frequency control
+        //! question：频率过低的时候不应该做点其他事么？ 
         if (abs(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time) - FREQ) < 0.01 * FREQ)
         {
             first_image_time = img_msg->header.stamp.toSec();
@@ -43,16 +45,22 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     else
         PUB_THIS_FRAME = false;
 
+    //! Step2:读入图像，并进行KLT跟踪
     cv_bridge::CvImageConstPtr ptr = cv_bridge::toCvCopy(img_msg, sensor_msgs::image_encodings::MONO8);
     cv::Mat show_img = ptr->image;
     TicToc t_r;
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         ROS_DEBUG("processing camera %d", i);
+
+        //! 针对单目相机读入图像，进入KLT跟踪阶段
         if (i != 1 || !STEREO_TRACK)
             trackerData[i].readImage(ptr->image.rowRange(ROW * i, ROW * (i + 1)));
+        
+        //! 针对双目相机?
         else
         {
+            //! 是否补偿
             if (EQUALIZE)
             {
                 cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
@@ -69,7 +77,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 
     if ( PUB_THIS_FRAME && STEREO_TRACK && trackerData[0].cur_pts.size() > 0)
     {
-        pub_count++;
+        pub_count++;  
         r_status.clear();
         r_err.clear();
         TicToc t_o;

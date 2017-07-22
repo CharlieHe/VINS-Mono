@@ -34,6 +34,13 @@ void registerPub(ros::NodeHandle &n)
     keyframebasevisual.setLineWidth(0.01);
 }
 
+/**
+ * [pubLatestOdometry 发布位姿和速度]
+ * @param P      [位置]
+ * @param Q      [姿态]
+ * @param V      [速度]
+ * @param header [帧头]
+ */
 void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, const Eigen::Vector3d &V, const std_msgs::Header &header)
 {
     Eigen::Quaterniond quadrotor_Q = Q ;

@@ -41,7 +41,12 @@ int FeatureManager::getFeatureCount()
     return cnt;
 }
 
-
+/**
+ * [FeatureManager::addFeatureCheckParallax description]
+ * @param  frame_count [description]
+ * @param  image       [description]
+ * @return             [description]
+ */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Vector3d>>> &image)
 {
     ROS_DEBUG("input feature: %d", (int)image.size());

@@ -2,6 +2,11 @@
 
 int FeatureTracker::n_id = 0;
 
+/**
+ * [inBorder 判断该Feature是否在图像上]
+ * @param  pt [Feature坐标]
+ * @return    [description]
+ */
 bool inBorder(const cv::Point2f &pt)
 {
     const int BORDER_SIZE = 1;
@@ -10,6 +15,11 @@ bool inBorder(const cv::Point2f &pt)
     return BORDER_SIZE <= img_x && img_x < COL - BORDER_SIZE && BORDER_SIZE <= img_y && img_y < ROW - BORDER_SIZE;
 }
 
+/**
+ * [reduceVector 根据status的状态，剔除tracking失败的点]
+ * @param v      [description]
+ * @param status [description]
+ */
 void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
 {
     int j = 0;
@@ -19,6 +29,11 @@ void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
     v.resize(j);
 }
 
+/**
+ * [reduceVector 根据status的状态，剔除tracking失败的点]
+ * @param v      [description]
+ * @param status [description]
+ */
 void reduceVector(vector<int> &v, vector<uchar> status)
 {
     int j = 0;
@@ -32,6 +47,10 @@ FeatureTracker::FeatureTracker()
 {
 }
 
+/**
+ * [FeatureTracker::setMask description]
+
+ */
 void FeatureTracker::setMask()
 {
     if(FISHEYE)
@@ -41,12 +60,14 @@ void FeatureTracker::setMask()
     
 
     // prefer to keep features that are tracked for long time
-    vector<pair<int, pair<cv::Point2f, int>>> cnt_pts_id;
+    vector< pair<int, pair<cv::Point2f, int> > > cnt_pts_id;
 
+    //! 因为刚开始的时候track_cnt的大小和Max_Features是相等的
     for (unsigned int i = 0; i < forw_pts.size(); i++)
         cnt_pts_id.push_back(make_pair(track_cnt[i], make_pair(forw_pts[i], ids[i])));
 
-    sort(cnt_pts_id.begin(), cnt_pts_id.end(), [](const pair<int, pair<cv::Point2f, int>> &a, const pair<int, pair<cv::Point2f, int>> &b)
+    //! 根据跟踪效果对Features排序
+    sort(cnt_pts_id.begin(), cnt_pts_id.end(), [](const pair<int, pair<cv::Point2f, int> > &a, const pair<int, pair<cv::Point2f, int> > &b)
          {
             return a.first > b.first;
          });
@@ -67,6 +88,9 @@ void FeatureTracker::setMask()
     }
 }
 
+/**
+ * [FeatureTracker::addPoints 将上一幅图像中品质较高的Features存入到上一图像的跟踪得到的Features中]
+ */
 void FeatureTracker::addPoints()
 {
     for (auto &p : n_pts)
@@ -82,6 +106,7 @@ void FeatureTracker::readImage(const cv::Mat &_img)
     cv::Mat img;
     TicToc t_r;
 
+    //! Step1：对原始图像做增强
     if (EQUALIZE)
     {
         //! 利用自适应直方图均衡算法对图像做增强处理
@@ -93,6 +118,7 @@ void FeatureTracker::readImage(const cv::Mat &_img)
     else
         img = _img;
 
+    //! Step2: 读入增强后的图像
     if (forw_img.empty())
     {
         prev_img = cur_img = forw_img = img;
@@ -104,38 +130,52 @@ void FeatureTracker::readImage(const cv::Mat &_img)
 
     forw_pts.clear();
 
+    //! Step3: 利用LKT算法对Features进行tracking
     if (cur_pts.size() > 0)
     {
         TicToc t_o;
         vector<uchar> status;
         vector<float> err;
+
+        //! Step3.1:进行LKT跟踪
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
+        //! Step3.2: 剔除跟踪后不在图像之内的Feature的状态标志位
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
                 status[i] = 0;
+
+        //! Step3.3:剔除跟踪失败的Features
         reduceVector(prev_pts, status);
         reduceVector(cur_pts, status);
         reduceVector(forw_pts, status);
         reduceVector(ids, status);
+        //！保证了track_cnt的大小和forw_pts是是一致的
         reduceVector(track_cnt, status);
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
 
     if (PUB_THIS_FRAME)
     {
+        //! Step4: 计算F矩阵，剔除外点
         rejectWithF();
 
+        //! question：这个地方有什么作用？
         for (auto &n : track_cnt)
             n++;
 
         ROS_DEBUG("set mask begins");
         TicToc t_m;
+
+        //！Step5: 
+        //
         setMask();
         ROS_DEBUG("set mask costs %fms", t_m.toc());
 
         ROS_DEBUG("detect feature begins");
         TicToc t_t;
+
+        //! 
         int n_max_cnt = MAX_CNT - static_cast<int>(forw_pts.size());
         if (n_max_cnt > 0)
         {
@@ -145,6 +185,8 @@ void FeatureTracker::readImage(const cv::Mat &_img)
                 cout << "mask type wrong " << endl;
             if (mask.size() != forw_img.size())
                 cout << "wrong size " << endl;
+
+            //! 在上一幅图像中选取MAX_CNT - forw_pts.size()质量最高的点，以达到tracking过程中最大角点个数的要求
             cv::goodFeaturesToTrack(forw_img, n_pts, MAX_CNT - forw_pts.size(), 0.1, MIN_DIST, mask);
         }
         else
@@ -164,12 +206,13 @@ void FeatureTracker::readImage(const cv::Mat &_img)
 }
 
 /**
- * [FeatureTracker::rejectWithF description]
+ * [FeatureTracker::rejectWithF 通过计算F矩阵，剔除Features中的外点]
  */
 void FeatureTracker::rejectWithF()
 {
     if (forw_pts.size() >= 8)
     {
+        //! Step4.1: 将特征点经过畸变矫正后再投影到图像平面上 
         ROS_DEBUG("FM ransac begins");
         TicToc t_f;
         vector<cv::Point2f> un_prev_pts(prev_pts.size()), un_forw_pts(forw_pts.size());
@@ -183,12 +226,15 @@ void FeatureTracker::rejectWithF()
 
             m_camera->liftProjective(Eigen::Vector2d(forw_pts[i].x, forw_pts[i].y), tmp_p);
             tmp_p.x() = FOCAL_LENGTH * tmp_p.x() / tmp_p.z() + COL / 2.0;
-            tmp_p.y() = FOCAL_LENGTH * tmp_p.y() / tmp_p.z() + ROW / 2.0;
+            tmp_p.y() = FOCAL_LENGTH * tmp_p.y() / tmp_p.z() + ROW / 2.0; 
             un_forw_pts[i] = cv::Point2f(tmp_p.x(), tmp_p.y());
         }
 
+        //! Step4.2: 通过计算F矩阵，得到内外点
         vector<uchar> status;
         cv::findFundamentalMat(un_prev_pts, un_forw_pts, cv::FM_RANSAC, F_THRESHOLD, 0.99, status);
+
+        //! Step4.3: 将Features中的外点剔除
         int size_a = prev_pts.size();
         reduceVector(prev_pts, status);
         reduceVector(cur_pts, status);
@@ -200,6 +246,11 @@ void FeatureTracker::rejectWithF()
     }
 }
 
+/**
+ * [FeatureTracker::updateID 更新ID]
+ * @param  i [description]
+ * @return   [description]
+ */
 bool FeatureTracker::updateID(unsigned int i)
 {
     if (i < ids.size())
@@ -218,6 +269,10 @@ void FeatureTracker::readIntrinsicParameter(const string &calib_file)
     m_camera = CameraFactory::instance()->generateCameraFromYamlFile(calib_file);
 }
 
+/**
+ * [FeatureTracker::showUndistortion 显示未畸变的图像]
+ * @param name [description]
+ */
 void FeatureTracker::showUndistortion(const string &name)
 {
     cv::Mat undistortedImg(ROW + 600, COL + 600, CV_8UC1, cv::Scalar(0));
@@ -254,6 +309,9 @@ void FeatureTracker::showUndistortion(const string &name)
     cv::waitKey(0);
 }
 
+/**
+ * 将图像坐标恢复为畸变之前的坐标
+ */
 vector<cv::Point2f> FeatureTracker::undistortedPoints()
 {
     vector<cv::Point2f> un_pts;

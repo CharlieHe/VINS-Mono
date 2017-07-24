@@ -122,6 +122,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         }
     }
 
+    //! Step3:
     for (unsigned int i = 0;; i++)
     {
         bool completed = false;
@@ -132,6 +133,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
             break;
     }
 
+    //! Step4：对Features进行畸变恢复之后发布到VIO估计器，将没有经过畸变矫正的Features在图像上标出
    if (PUB_THIS_FRAME)
    {
         pub_count++;
@@ -143,7 +145,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         feature_points->header = img_msg->header;
         feature_points->header.frame_id = "world";
 
-        vector<set<int>> hash_ids(NUM_OF_CAM);
+        vector< set<int> > hash_ids(NUM_OF_CAM);
         for (int i = 0; i < NUM_OF_CAM; i++)
         {
             if (i != 1 || !STEREO_TRACK)
@@ -194,6 +196,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         ROS_DEBUG("publish %f, at %f", feature_points->header.stamp.toSec(), ros::Time::now().toSec());
         pub_img.publish(feature_points);
 
+        //! 在当前图像上标出Features，这个地方标出的是畸变之后的图像坐标
         if (SHOW_TRACK)
         {
             ptr = cv_bridge::cvtColor(ptr, sensor_msgs::image_encodings::BGR8);

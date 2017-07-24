@@ -48,8 +48,12 @@ class FeatureTracker
 
     cv::Mat mask;
     cv::Mat fisheye_mask;
+
+    //! 这个prev_img没有看到实际作用，cur_img是上一帧，forw_img是当前帧
     cv::Mat prev_img, cur_img, forw_img;
+    //! 除了KLT得到的Freatures之外，新提取的Features以满足最大特征点数目要求
     vector<cv::Point2f> n_pts;
+    //! 和图像image同理
     vector<cv::Point2f> prev_pts, cur_pts, forw_pts;
     vector<int> ids;
     vector<int> track_cnt;

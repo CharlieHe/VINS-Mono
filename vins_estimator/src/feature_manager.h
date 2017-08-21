@@ -32,6 +32,7 @@ class FeaturePerFrame
     double dep_gradient;
 };
 
+//！单个特征点
 class FeaturePerId
 {
   public:
@@ -47,6 +48,7 @@ class FeaturePerId
 
     Vector3d gt_p;
 
+    //! _feature_id: feature的ID，_start_frame：所属的关键帧ID
     FeaturePerId(int _feature_id, int _start_frame)
         : feature_id(_feature_id), start_frame(_start_frame),
           used_num(0), estimated_depth(-1.0), solve_flag(0)

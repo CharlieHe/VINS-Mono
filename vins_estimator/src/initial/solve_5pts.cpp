@@ -190,10 +190,18 @@ namespace cv {
 }
 
 
+/**
+ * [MotionEstimator::solveRelativeRT 利用5点法求解变换矩阵]
+ * @param  corres      [匹配点]
+ * @param  Rotation    [旋转量]
+ * @param  Translation [平移量]
+ * @return             [description]
+ */
 bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &corres, Matrix3d &Rotation, Vector3d &Translation)
 {
     if (corres.size() >= 15)
     {
+        //! Step1：提取匹配完的Features
         vector<cv::Point2f> ll, rr;
         for (int i = 0; i < int(corres.size()); i++)
         {
@@ -201,23 +209,27 @@ bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &co
             rr.push_back(cv::Point2f(corres[i].second(0), corres[i].second(1)));
         }
         cv::Mat mask;
+        //! Step2：利用Ransac算法计算本质矩阵，内外点的阈值距离设定为0.3 / 460
         cv::Mat E = cv::findFundamentalMat(ll, rr, cv::FM_RANSAC, 0.3 / 460, 0.99, mask);
         cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 1, 0, 0, 0, 1, 0, 0, 0, 1);
         cv::Mat rot, trans;
+        //! Step3：计算变换矩阵并得到内点个数
         int inlier_cnt = cv::recoverPose(E, ll, rr, cameraMatrix, rot, trans, mask);
         //cout << "inlier_cnt " << inlier_cnt << endl;
 
         Eigen::Matrix3d R;
         Eigen::Vector3d T;
+        //! Mat转Eigen
         for (int i = 0; i < 3; i++)
         {   
             T(i) = trans.at<double>(i, 0);
             for (int j = 0; j < 3; j++)
                 R(i, j) = rot.at<double>(i, j);
         }
-
+        //! Step4：得到旋转矩阵和平移量
         Rotation = R.transpose();
         Translation = -R.transpose() * T;
+        //! 判断求取的内点个数是否满足要求
         if(inlier_cnt > 12)
             return true;
         else

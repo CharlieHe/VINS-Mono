@@ -128,6 +128,9 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
 {
     ROS_DEBUG("new image coming ------------------------------------------");
     ROS_DEBUG("Adding feature points %lu", image.size());
+
+    //! 基于视差来选择关键帧(经过旋转补偿)
+    //! 在滑窗内添加features，并确定要进行边缘化的方式？
     if (f_manager.addFeatureCheckParallax(frame_count, image))
         marginalization_flag = MARGIN_OLD;
     else
@@ -139,9 +142,10 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
 
+    //! 分别将读到的features和imu_mea加入到各自的序列当中。
     ImageFrame imageframe(image, header.stamp.toSec());
     imageframe.pre_integration = tmp_pre_integration;
-    all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe));
+    all_image_frame.insert(make_pair(header.stamp.transposec(), imageframe));
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
 
     if(ESTIMATE_EXTRINSIC == 2)
@@ -149,8 +153,10 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
         ROS_INFO("calibrating extrinsic param, rotation movement is needed");
         if (frame_count != 0)
         {
+            //! 选取两帧之间共有的Features
             vector<pair<Vector3d, Vector3d>> corres = f_manager.getCorresponding(frame_count - 1, frame_count);
             Matrix3d calib_ric;
+            //! 校准相机与IMU之间的旋转
             if (initial_ex_rotation.CalibrationExRotation(corres, pre_integrations[frame_count]->delta_q, calib_ric))
             {
                 ROS_WARN("initial extrinsic rotation calib success");
@@ -169,6 +175,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
             bool result = false;
             if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1)
             {
+                //！相机初始化
                result = initialStructure();
                initial_timestamp = header.stamp.toSec();
             }
@@ -222,11 +229,14 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
         last_P0 = Ps[0];
     }
 }
+
 bool Estimator::initialStructure()
 {
     TicToc t_sfm;
+    //! Step1：通过计算预积分加速度的标准差，检测IMU的可观性
     //check imu observibility
     {
+        //! 计算均值
         map<double, ImageFrame>::iterator frame_it;
         Vector3d sum_g;
         for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
@@ -235,6 +245,7 @@ bool Estimator::initialStructure()
             Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
             sum_g += tmp_g;
         }
+        //! 计算方差
         Vector3d aver_g;
         aver_g = sum_g * 1.0 / ((int)all_image_frame.size() - 1);
         double var = 0;
@@ -245,8 +256,10 @@ bool Estimator::initialStructure()
             var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);
             //cout << "frame g " << tmp_g.transpose() << endl;
         }
+        //！计算标准差
         var = sqrt(var / ((int)all_image_frame.size() - 1));
         //ROS_WARN("IMU variation %f!", var);
+        //！以标准差判断可观性
         if(var < 0.25)
         {
             ROS_INFO("IMU excitation not enouth!");
@@ -254,6 +267,7 @@ bool Estimator::initialStructure()
         }
     }
     // global sfm
+    //！存入 global sfm用到的Features
     Quaterniond Q[frame_count + 1];
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
@@ -275,12 +289,15 @@ bool Estimator::initialStructure()
     Matrix3d relative_R;
     Vector3d relative_T;
     int l;
+
+    //! 求取滑窗内最新关键帧与满足共视要求的关键帧之间的变换矩阵
     if (!relativePose(relative_R, relative_T, l))
     {
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
     GlobalSFM sfm;
+    //! 三角化恢复滑窗内的Features
     if(!sfm.construct(frame_count + 1, Q, T, l,
               relative_R, relative_T,
               sfm_f, sfm_tracked_points))
@@ -293,13 +310,15 @@ bool Estimator::initialStructure()
     //solve pnp for all frame
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
-    frame_it = all_image_frame.begin( );
-    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)
+    frame_it = all_image_frame.begin();
+    for (int i = 0; frame_it != all_image_frame.end(); frame_it++)
     {
+        //！如果帧头和滑窗内关键帧的帧头相同，则直接读取位姿即可
         // provide initial guess
         cv::Mat r, rvec, t, D, tmp_r;
         if((frame_it->first) == Headers[i].stamp.toSec())
         {
+            //！一次性转换到相机坐标系下
             frame_it->second.is_key_frame = true;
             frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();
             frame_it->second.T = T[i];
@@ -310,6 +329,7 @@ bool Estimator::initialStructure()
         {
             i++;
         }
+
         Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
         Vector3d P_inital = - R_inital * T[i];
         cv::eigen2cv(R_inital, tmp_r);
@@ -370,6 +390,10 @@ bool Estimator::initialStructure()
 
 }
 
+/**
+ * [Estimator::visualInitialAlign 视觉与IMU的对齐]
+ * @return [description]
+ */
 bool Estimator::visualInitialAlign()
 {
     TicToc t_g;
@@ -448,17 +472,28 @@ bool Estimator::visualInitialAlign()
     return true;
 }
 
+/**
+ * [Estimator::relativePose 在滑窗中寻找与最新的关键帧共视关系最强的关键帧]
+ * @param  relative_R [description]
+ * @param  relative_T [description]
+ * @param  l          [description]
+ * @return            [description]
+ */
 bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
     // find previous frame which contians enough correspondance and parallex with newest frame
+    //！在滑窗内寻找与最新的关键帧共视点超过20(像素点)的关键帧
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
         corres = f_manager.getCorresponding(i, WINDOW_SIZE);
+        //! 共视的Features应该大于20
         if (corres.size() > 20)
         {
             double sum_parallax = 0;
             double average_parallax;
+
+            //! 求取匹配的特征点在图像上的视差和(单位为像素点)
             for (int j = 0; j < int(corres.size()); j++)
             {
                 Vector2d pts_0(corres[j].first(0), corres[j].first(1));
@@ -467,7 +502,9 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
                 sum_parallax = sum_parallax + parallax;
 
             }
+            //! 求取所有匹配的特征点的平均视差
             average_parallax = 1.0 * sum_parallax / int(corres.size());
+            //! 视差大于一定阈值，并且能够有效地求解出变换矩阵
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;

@@ -43,8 +43,8 @@ int FeatureManager::getFeatureCount()
 
 /**
  * [FeatureManager::addFeatureCheckParallax description]
- * @param  frame_count [description]
- * @param  image       [description]
+ * @param  frame_count [滑窗内关键帧ID]
+ * @param  image       [第ID帧Features]
  * @return             [description]
  */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Vector3d>>> &image)
@@ -58,17 +58,21 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     {
         FeaturePerFrame f_per_fra(id_pts.second[0].second);
 
+        //! 在feature列表中寻找id为feature_id的feature
         int feature_id = id_pts.first;
         auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
                           {
             return it.feature_id == feature_id;
                           });
 
+        //! 如果该id对应的是feature列表中的最后一个feature，则用该id对应的feature替换列表中末尾的feature
         if (it == feature.end())
         {
             feature.push_back(FeaturePerId(feature_id, frame_count));
             feature.back().feature_per_frame.push_back(f_per_fra);
         }
+
+        //! 如果该feature不是列表中的最后一个，则将跟踪次数加1
         else if (it->feature_id == feature_id)
         {
             it->feature_per_frame.push_back(f_per_fra);
@@ -76,11 +80,14 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
         }
     }
 
+    //! 如果滑窗内的关键帧的个数小于2或者跟踪次数小于20
     if (frame_count < 2 || last_track_num < 20)
         return true;
 
+    //! 
     for (auto &it_per_id : feature)
     {
+        //! 如果该Feature不属于滑窗的导数两帧
         if (it_per_id.start_frame <= frame_count - 2 &&
             it_per_id.start_frame + int(it_per_id.feature_per_frame.size()) - 1 >= frame_count - 1)
         {
@@ -122,11 +129,17 @@ void FeatureManager::debugShow()
     }
 }
 
+/**
+ * [FeatureManager::addFeatureCheckParallax 选取两帧之间共有的Features]
+ * @param  frame_count_l    [Feature_frame1]
+ * @param  frame_count_r    [Feature_frame2]
+ */
 vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_count_l, int frame_count_r)
 {
     vector<pair<Vector3d, Vector3d>> corres;
     for (auto &it : feature)
     {
+        //! 保证两帧的id大于当前特征点的起始id小于当前特征点的终止id
         if (it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r)
         {
             Vector3d a = Vector3d::Zero(), b = Vector3d::Zero();
@@ -355,6 +368,12 @@ void FeatureManager::removeFront(int frame_count)
     }
 }
 
+/**
+ * [FeatureManager::compensatedParallax2 description]
+ * @param  it_per_id   [description]
+ * @param  frame_count [description]
+ * @return             [description]
+ */
 double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int frame_count)
 {
     //check the second last frame is keyframe or not

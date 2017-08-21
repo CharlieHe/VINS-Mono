@@ -75,6 +75,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 #endif
     }
 
+    //！针对双目
     if ( PUB_THIS_FRAME && STEREO_TRACK && trackerData[0].cur_pts.size() > 0)
     {
         pub_count++;  
@@ -122,7 +123,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         }
     }
 
-    //! Step3:
+    //! Step3: 这个地方是什么作用呢。。。
     for (unsigned int i = 0;; i++)
     {
         bool completed = false;

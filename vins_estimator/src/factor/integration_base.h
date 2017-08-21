@@ -70,12 +70,13 @@ class IntegrationBase
      * @param update_jacobian      [是否更新雅克比矩阵]
      *
      * 论文中的预积分部分采用积分法的是欧拉法(对应参考文献[1]中的公式(6)部分),这个地方使用的是中值法
-     * 区别在于在积分过程中加速度a和陀螺仪w的选择，欧拉法使用当前时间内的测量值，中值法去了上一时刻和当前时刻的中值(坐标系变换)
+     * 区别在于在积分过程中加速度a和陀螺仪w的选择，欧拉法使用当前时间内的测量值，中值法取了上一时刻和当前时刻的中值(坐标系变换)
+     * 具体可以参考注释文档中1.1小节离散状态下预积分方程式
      * w_k' = 0.5*(w_k + w_k-1) - b_w
      *             |   1    |
      * r_i+1 = r_i×|0.5*w_k'|
-     *
-     * a_k' = 0.5*[r_i*(a_k-1-b_a) + r_i+1+1(a_k-b_a)]
+     * a_k' = 0.5*[r_i*(a_k-1-b_a) + r_i+1*(a_k-b_a)]
+     * 
      * α_i+1 = α_i + β_i*t +0.5*a_k'*t*t
      * β_i+! = β_i + a_k'*t
      */  
@@ -105,6 +106,7 @@ class IntegrationBase
         //! Step2: 计算雅克比矩阵 
         //! 离散状态下在计算协方差矩阵的时候为：P' = FPF' + GQG'
         //! F矩阵的行顺序为：α，θ，β，b_a, b_w
+        //! 这部分推导参考代码中comments文件中1.2 误差状态方程推导部分
         if(update_jacobian)
         {
             Vector3d w_x = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
@@ -199,9 +201,11 @@ class IntegrationBase
     }
 
     /**
-     * 评估是否需要进行repropagate
-     * 计算两种测量方式的残差
+     * [evaluate 计算两次预积分(两种Bias之下的？)状态的差值，以此来评估评估是否需要进行repropagate？]
+     * @param Pi，Qi，Vi，Bai，Bgi  [前一次预积分结果]
+     * @param Pj，Qj，Vj，Baj，Bgj  [后一次预积分结果]
      */
+
     Eigen::Matrix<double, 15, 1> evaluate(const Eigen::Vector3d &Pi, const Eigen::Quaterniond &Qi, const Eigen::Vector3d &Vi, const Eigen::Vector3d &Bai, const Eigen::Vector3d &Bgi,
                                           const Eigen::Vector3d &Pj, const Eigen::Quaterniond &Qj, const Eigen::Vector3d &Vj, const Eigen::Vector3d &Baj, const Eigen::Vector3d &Bgj)
     {

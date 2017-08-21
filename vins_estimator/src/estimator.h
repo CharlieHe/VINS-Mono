@@ -105,6 +105,7 @@ class Estimator
     vector<Vector3d> linear_acceleration_buf[(WINDOW_SIZE + 1)];
     vector<Vector3d> angular_velocity_buf[(WINDOW_SIZE + 1)];
 
+    //! 滑窗内关键帧的个数
     int frame_count;
     int sum_of_outlier, sum_of_back, sum_of_front, sum_of_invalid;
 

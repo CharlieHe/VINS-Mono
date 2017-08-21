@@ -469,6 +469,8 @@ void process()
 {
     while (true)
     {
+        //! Step1: 获取Features和IMU测量数据
+        //! 
         //! 单帧图像对应多帧IMU数据的结构
         std::vector<std::pair< std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr> > measurements;
         std::unique_lock<std::mutex> lk(m_buf);
@@ -480,6 +482,7 @@ void process()
 
         for (auto &measurement : measurements)
         {
+            //! Step2: 对读取到的IMU进行预积分
             for (auto &imu_msg : measurement.first)
                 send_imu(imu_msg);
 

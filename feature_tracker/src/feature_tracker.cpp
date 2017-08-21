@@ -48,7 +48,7 @@ FeatureTracker::FeatureTracker()
 }
 
 /**
- * [FeatureTracker::setMask description]
+ * [FeatureTracker::setMask 将Features1根据跟踪次数大小排序，并且设置后续提取强角点的Region]
 
  */
 void FeatureTracker::setMask()
@@ -72,10 +72,12 @@ void FeatureTracker::setMask()
             return a.first > b.first;
          });
 
+    //! 清除当前帧的所有Features，id及跟踪次数
     forw_pts.clear();
     ids.clear();
     track_cnt.clear();
 
+    //! 将mask中以Features为圆心的，MIN_DIST为半径的区域全部置0，在后面就不在这些区域中选取强角点了。
     for (auto &it : cnt_pts_id)
     {
         if (mask.at<uchar>(it.second.first) == 255)
@@ -89,7 +91,7 @@ void FeatureTracker::setMask()
 }
 
 /**
- * [FeatureTracker::addPoints 将上一幅图像中品质较高的Features存入到上一图像的跟踪得到的Features中]
+ * [FeatureTracker::addPoints 将当前图像中选取的强角点加入到tracking的Features中，以满足最大Features的数目]
  */
 void FeatureTracker::addPoints()
 {
@@ -160,14 +162,14 @@ void FeatureTracker::readImage(const cv::Mat &_img)
         //! Step4: 计算F矩阵，剔除外点
         rejectWithF();
 
-        //! question：这个地方有什么作用？
+        //! 将满足经过KLT跟踪、在图像内及没有被ransac剔除三个条件的Features的跟踪次数加1
         for (auto &n : track_cnt)
             n++;
 
         ROS_DEBUG("set mask begins");
         TicToc t_m;
 
-        //！Step5: 
+        //！Step5: 设置要提取强角点的区域
         //
         setMask();
         ROS_DEBUG("set mask costs %fms", t_m.toc());
@@ -175,7 +177,7 @@ void FeatureTracker::readImage(const cv::Mat &_img)
         ROS_DEBUG("detect feature begins");
         TicToc t_t;
 
-        //! 
+        //! Step6：若跟踪的Features未达到最大值，则另外选取一些强角点
         int n_max_cnt = MAX_CNT - static_cast<int>(forw_pts.size());
         if (n_max_cnt > 0)
         {
@@ -195,6 +197,7 @@ void FeatureTracker::readImage(const cv::Mat &_img)
 
         ROS_DEBUG("add feature begins");
         TicToc t_a;
+        //！Step6：将选取的强角点加入到tracking的Featues中
         addPoints();
         ROS_DEBUG("selectFeature costs: %fms", t_a.toc());
 
@@ -310,7 +313,7 @@ void FeatureTracker::showUndistortion(const string &name)
 }
 
 /**
- * 将图像坐标恢复为畸变之前的坐标
+ * 将图像坐标转到归一化平面上，并进行畸变校正
  */
 vector<cv::Point2f> FeatureTracker::undistortedPoints()
 {

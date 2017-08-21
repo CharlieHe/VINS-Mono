@@ -53,7 +53,7 @@ class FeatureTracker
     cv::Mat prev_img, cur_img, forw_img;
     //! 除了KLT得到的Freatures之外，新提取的Features以满足最大特征点数目要求
     vector<cv::Point2f> n_pts;
-    //! 和图像image同理
+    //! 和图像image同理,cur_pts：上一帧特征点，forw_pts是当前帧特征点
     vector<cv::Point2f> prev_pts, cur_pts, forw_pts;
     vector<int> ids;
     vector<int> track_cnt;

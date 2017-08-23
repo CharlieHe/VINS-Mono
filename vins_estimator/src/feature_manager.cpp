@@ -187,6 +187,10 @@ void FeatureManager::removeFailures()
     }
 }
 
+/**
+ * [FeatureManager::clearDepth 设定指定特征点的深度值]
+ * @param x [description]
+ */
 void FeatureManager::clearDepth(const VectorXd &x)
 {
     int feature_index = -1;
@@ -199,6 +203,10 @@ void FeatureManager::clearDepth(const VectorXd &x)
     }
 }
 
+/**
+ * [FeatureManager::getDepthVector 读取特征点的深度值]
+ * @return [description]
+ */
 VectorXd FeatureManager::getDepthVector()
 {
     VectorXd dep_vec(getFeatureCount());
@@ -217,6 +225,14 @@ VectorXd FeatureManager::getDepthVector()
     return dep_vec;
 }
 
+/**
+ * [FeatureManager::triangulate 三角化没有恢复出深度的特征点]
+ * @param Ps  [description]
+ * @param tic [description]
+ * @param ric [description]
+ * 1.将所有的frame转到同一个frame之下。
+ * 2.进行三角化的剩余步骤。
+ */
 void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
 {
     for (auto &it_per_id : feature)
@@ -243,6 +259,7 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
         {
             imu_j++;
 
+            //！将坐标都转到Frame[imu_i]的坐标系下
             Eigen::Vector3d t1 = Ps[imu_j] + Rs[imu_j] * tic[0];
             Eigen::Matrix3d R1 = Rs[imu_j] * ric[0];
             Eigen::Vector3d t = R0.transpose() * (t1 - t0);
@@ -254,6 +271,7 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
             svd_A.row(svd_idx++) = f[0] * P.row(2) - f[2] * P.row(0);
             svd_A.row(svd_idx++) = f[1] * P.row(2) - f[2] * P.row(1);
 
+            //！把这个放前面，不更省事
             if (imu_i == imu_j)
                 continue;
         }

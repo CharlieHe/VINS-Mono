@@ -38,6 +38,7 @@ class FeaturePerId
   public:
     const int feature_id;
     int start_frame;
+    //！观测到该特征点的关键帧集合
     vector<FeaturePerFrame> feature_per_frame;
 
     int used_num;

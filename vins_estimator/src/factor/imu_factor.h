@@ -16,9 +16,18 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
     IMUFactor(IntegrationBase* _pre_integration):pre_integration(_pre_integration)
     {
     }
+
+    /**
+     * [Evaluate 计算残差和雅克比矩阵]
+     * @param  parameters [description]
+     * @param  residuals  [description]
+     * @param  jacobians  [description]
+     * @return            [description]
+     */
     virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
     {
 
+        //！第k帧预积分结果
         Eigen::Vector3d Pi(parameters[0][0], parameters[0][1], parameters[0][2]);
         Eigen::Quaterniond Qi(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
 
@@ -26,6 +35,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
         Eigen::Vector3d Bai(parameters[1][3], parameters[1][4], parameters[1][5]);
         Eigen::Vector3d Bgi(parameters[1][6], parameters[1][7], parameters[1][8]);
 
+        //！第k+1帧预积分结果
         Eigen::Vector3d Pj(parameters[2][0], parameters[2][1], parameters[2][2]);
         Eigen::Quaterniond Qj(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
 
@@ -61,10 +71,14 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
         residual = pre_integration->evaluate(Pi, Qi, Vi, Bai, Bgi,
                                             Pj, Qj, Vj, Baj, Bgj);
 
+        //！真实的马氏距离：d=sqrt(rTPr)，但是ceres只接受最小二乘形式的优化项，即min(eTe)
+        //！所以将rTPr分解为：rTLLTr，将 r'=LTr作为新的优化误差
+        //！通过cholesky分解求取信息矩阵的平方根
         Eigen::Matrix<double, 15, 15> sqrt_info = Eigen::LLT<Eigen::Matrix<double, 15, 15>>(pre_integration->covariance.inverse()).matrixL().transpose();
         //sqrt_info.setIdentity();
         residual = sqrt_info * residual;
 
+        //！这里的雅克比矩阵作用是什么
         if (jacobians)
         {
             double sum_dt = pre_integration->sum_dt;
@@ -76,6 +90,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
             Eigen::Matrix3d dv_dba = pre_integration->jacobian.template block<3, 3>(O_V, O_BA);
             Eigen::Matrix3d dv_dbg = pre_integration->jacobian.template block<3, 3>(O_V, O_BG);
 
+            //！根据雅克比矩阵所有系数的的最大值和最小值判断其稳定性
             if (pre_integration->jacobian.maxCoeff() > 1e8 || pre_integration->jacobian.minCoeff() < -1e8)
             {
                 ROS_WARN("numerical unstable in preintegration");
@@ -83,16 +98,20 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
 ///                ROS_BREAK();
             }
 
+            //！雅克比矩阵的秩和costfunction中参数块的大小是一致的
+            //！J[i] 是一个大小为CostFunction::num_residuals_ x CostFunction::parameter_block_sizes_的向量
+            //！详细参考：http://ceres-solver.org/nnls_modeling.html?highlight=set_num_residuals#_CPPv2N5ceres12CostFunction8EvaluateEPPCdPdPPd
             if (jacobians[0])
             {
-                Eigen::Map<Eigen::Matrix<double, 15, 7, Eigen::RowMajor>> jacobian_pose_i(jacobians[0]);
+                //！将jacobians[0]重新写为15*7的矩阵
+                Eigen::Map< Eigen::Matrix<double, 15, 7, Eigen::RowMajor> > jacobian_pose_i(jacobians[0]);
                 jacobian_pose_i.setZero();
 
                 jacobian_pose_i.block<3, 3>(O_P, O_P) = -Qi.inverse().toRotationMatrix();
                 jacobian_pose_i.block<3, 3>(O_P, O_R) = Utility::skewSymmetric(Qi.inverse() * (0.5 * G * sum_dt * sum_dt + Pj - Pi - Vi * sum_dt));
 
 #if 0
-            jacobian_pose_i.block<3, 3>(O_R, O_R) = -(Qj.inverse() * Qi).toRotationMatrix();
+                jacobian_pose_i.block<3, 3>(O_R, O_R) = -(Qj.inverse() * Qi).toRotationMatrix();
 #else
                 Eigen::Quaterniond corrected_delta_q = pre_integration->delta_q * Utility::deltaQ(dq_dbg * (Bgi - pre_integration->linearized_bg));
                 jacobian_pose_i.block<3, 3>(O_R, O_R) = -(Utility::Qleft(Qj.inverse() * Qi) * Utility::Qright(corrected_delta_q)).bottomRightCorner<3, 3>();
@@ -118,7 +137,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
                 jacobian_speedbias_i.block<3, 3>(O_P, O_BG - O_V) = -dp_dbg;
 
 #if 0
-            jacobian_speedbias_i.block<3, 3>(O_R, O_BG - O_V) = -dq_dbg;
+                jacobian_speedbias_i.block<3, 3>(O_R, O_BG - O_V) = -dq_dbg;
 #else
                 Eigen::Quaterniond corrected_delta_q = pre_integration->delta_q * Utility::deltaQ(dq_dbg * (Bgi - pre_integration->linearized_bg));
                 jacobian_speedbias_i.block<3, 3>(O_R, O_BG - O_V) = -Utility::Qleft(Qj.inverse() * Qi * corrected_delta_q).bottomRightCorner<3, 3>() * dq_dbg;
@@ -145,7 +164,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
                 jacobian_pose_j.block<3, 3>(O_P, O_P) = Qi.inverse().toRotationMatrix();
 
 #if 0
-            jacobian_pose_j.block<3, 3>(O_R, O_R) = Eigen::Matrix3d::Identity();
+                jacobian_pose_j.block<3, 3>(O_R, O_R) = Eigen::Matrix3d::Identity();
 #else
                 Eigen::Quaterniond corrected_delta_q = pre_integration->delta_q * Utility::deltaQ(dq_dbg * (Bgi - pre_integration->linearized_bg));
                 jacobian_pose_j.block<3, 3>(O_R, O_R) = Utility::Qleft(corrected_delta_q.inverse() * Qi.inverse() * Qj).bottomRightCorner<3, 3>();

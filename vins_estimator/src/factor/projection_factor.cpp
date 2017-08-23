@@ -3,6 +3,14 @@
 Eigen::Matrix2d ProjectionFactor::sqrt_info;
 double ProjectionFactor::sum_t;
 
+/**
+ * 利用参考文献[1]中算法1，计算切平面上的两个正交基地
+ * if a!= [1,0,0]
+ *     b1 = a×[1,0,0]
+ * else 
+ *     b1 = a×[0,0,1]
+ * b2 = a × b1
+ */
 ProjectionFactor::ProjectionFactor(const Eigen::Vector3d &_pts_i, const Eigen::Vector3d &_pts_j) : pts_i(_pts_i), pts_j(_pts_j)
 {
 #ifdef UNIT_SPHERE_ERROR
@@ -18,6 +26,13 @@ ProjectionFactor::ProjectionFactor(const Eigen::Vector3d &_pts_i, const Eigen::V
 #endif
 };
 
+/**
+ * [ProjectionFactor::Evaluate 求取视觉的残差，即在切平面上的重投影误差]
+ * @param  parameters [description]
+ * @param  residuals  [description]
+ * @param  jacobians  [description]
+ * @return            [description]
+ */
 bool ProjectionFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
     TicToc tic_toc;
@@ -32,6 +47,8 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
 
     double inv_dep_i = parameters[3][0];
 
+    //！将(u_i,v_i)反投影到第j frame坐标系下
+    //！P'=Rcb''(Rj''(Ri(Rcb(P+t_cb)+t_i)-t_j)-t_cb)
     Eigen::Vector3d pts_camera_i = pts_i / inv_dep_i;
     Eigen::Vector3d pts_imu_i = qic * pts_camera_i + tic;
     Eigen::Vector3d pts_w = Qi * pts_imu_i + Pi;
@@ -39,8 +56,10 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
     Eigen::Vector3d pts_camera_j = qic.inverse() * (pts_imu_j - tic);
     Eigen::Map<Eigen::Vector2d> residual(residuals);
 
+    //！求取切平面上的误差
 #ifdef UNIT_SPHERE_ERROR 
     residual =  tangent_base * (pts_camera_j.normalized() - pts_j.normalized());
+    //！求取普通的误差
 #else
     double dep_j = pts_camera_j.z();
     residual = (pts_camera_j / dep_j).head<2>() - pts_j.head<2>();
@@ -120,6 +139,10 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
     return true;
 }
 
+/**
+ * [ProjectionFactor::check description]
+ * @param parameters [description]
+ */
 void ProjectionFactor::check(double **parameters)
 {
     double *res = new double[15];
@@ -144,6 +167,7 @@ void ProjectionFactor::check(double **parameters)
     std::cout << Eigen::Map<Eigen::Vector2d>(jaco[3]) << std::endl
               << std::endl;
 
+    //！在Evaluate之后再求一次残差
     Eigen::Vector3d Pi(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Qi(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
 
@@ -170,6 +194,7 @@ void ProjectionFactor::check(double **parameters)
     puts("num");
     std::cout << residual.transpose() << std::endl;
 
+    //！这个地方是什么作用。。。。。，求了19次不同形式的残差
     const double eps = 1e-6;
     Eigen::Matrix<double, 2, 19> num_jacobian;
     for (int k = 0; k < 19; k++)
@@ -187,6 +212,7 @@ void ProjectionFactor::check(double **parameters)
         int a = k / 3, b = k % 3;
         Eigen::Vector3d delta = Eigen::Vector3d(b == 0, b == 1, b == 2) * eps;
 
+        //！
         if (a == 0)
             Pi += delta;
         else if (a == 1)

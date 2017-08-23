@@ -266,6 +266,8 @@ bool Estimator::initialStructure()
             //return false;
         }
     }
+
+    //！滑窗内全局的SFM
     // global sfm
     //！存入 global sfm用到的Features
     Quaterniond Q[frame_count + 1];
@@ -393,6 +395,9 @@ bool Estimator::initialStructure()
 /**
  * [Estimator::visualInitialAlign 视觉与IMU的对齐]
  * @return [description]
+ *
+ * 1.修正陀螺仪的Bias
+ * 2.求取滑窗内每一帧IMU对应的速度、重力向量以及尺度因子
  */
 bool Estimator::visualInitialAlign()
 {
@@ -406,6 +411,9 @@ bool Estimator::visualInitialAlign()
         return false;
     }
 
+/********后面这部分代码需要重新注释**********************************/    
+
+    //！替换滑窗内相机位姿的旧值
     // change state
     for (int i = 0; i <= frame_count; i++)
     {
@@ -416,11 +424,13 @@ bool Estimator::visualInitialAlign()
         all_image_frame[Headers[i].stamp.toSec()].is_key_frame = true;
     }
 
+    //！设定指定Features的深度值
     VectorXd dep = f_manager.getDepthVector();
     for (int i = 0; i < dep.size(); i++)
         dep[i] = -1;
     f_manager.clearDepth(dep);
 
+    //！
     //triangulat on cam pose , no tic
     Vector3d TIC_TMP[NUM_OF_CAM];
     for(int i = 0; i < NUM_OF_CAM; i++)
@@ -429,14 +439,20 @@ bool Estimator::visualInitialAlign()
     f_manager.setRic(ric);
     f_manager.triangulate(Ps, &(TIC_TMP[0]), &(RIC[0]));
 
+    //！根据初始化得到的陀螺仪Bias，在滑窗内重新做一次预积分。
+    //！question：在得到Bias之后就做了一次，为什么这个地方还要做一次
     double s = (x.tail<1>())(0);
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
         pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);
     }
+
+    //！求滑窗内其他Frame以第一帧为参考系下的坐标
     for (int i = frame_count; i >= 0; i--)
         Ps[i] = s * Ps[i] - Rs[i] * TIC[0] - (s * Ps[0] - Rs[0] * TIC[0]);
     int kv = -1;
+
+    //！得到滑窗内关键帧的速度
     map<double, ImageFrame>::iterator frame_i;
     for (frame_i = all_image_frame.begin(); frame_i != all_image_frame.end(); frame_i++)
     {
@@ -446,6 +462,8 @@ bool Estimator::visualInitialAlign()
             Vs[kv] = frame_i->second.R * x.segment<3>(kv * 3);
         }
     }
+
+    //！得到滑窗内Features对应的特征点
     for (auto &it_per_id : f_manager.feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -454,6 +472,7 @@ bool Estimator::visualInitialAlign()
         it_per_id.estimated_depth *= s;
     }
 
+    //！显示部分
     Matrix3d R0 = Utility::g2R(g);
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
     R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
@@ -516,19 +535,28 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
     return false;
 }
 
+/**
+ * [Estimator::solveOdometry 进入SLAM的后端优化阶段]
+ */
 void Estimator::solveOdometry()
 {
+    //！如果滑窗内视觉帧的个数小于设定大小，则返回
     if (frame_count < WINDOW_SIZE)
         return;
     if (solver_flag == NON_LINEAR)
     {
+        //！三角化还没有得到深度的Features
         TicToc t_tri;
         f_manager.triangulate(Ps, tic, ric);
         ROS_DEBUG("triangulation costs %f", t_tri.toc());
+        //！进入优化阶段
         optimization();
     }
 }
 
+/**
+ * [Estimator::vector2double 将Stl Vector 转为Ceres可以处理的数组]
+ */
 void Estimator::vector2double()
 {
     for (int i = 0; i <= WINDOW_SIZE; i++)
@@ -692,19 +720,26 @@ bool Estimator::failureDetection()
     return false;
 }
 
-
+/**
+ * [Estimator::optimization 后端的优化]
+ */
 void Estimator::optimization()
 {
     ceres::Problem problem;
     ceres::LossFunction *loss_function;
     //loss_function = new ceres::HuberLoss(1.0);
+    //！设置柯西损失函数因子
     loss_function = new ceres::CauchyLoss(1.0);
+
+    //！Step1:添加待优化状态量
+    //！Step1.1：添加[p,q](7)，[speed,ba,bg](9)
     for (int i = 0; i < WINDOW_SIZE + 1; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
         problem.AddParameterBlock(para_Pose[i], SIZE_POSE, local_parameterization);
         problem.AddParameterBlock(para_SpeedBias[i], SIZE_SPEEDBIAS);
     }
+    //！Step1.2：添加相机与IMU的外参[p_cb,q_cb](7)
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
@@ -718,9 +753,12 @@ void Estimator::optimization()
             ROS_DEBUG("estimate extinsic param");
     }
 
+    //！将优化量存入数组
     TicToc t_whole, t_prepare;
     vector2double();
 
+    //！Step2：添加误差项
+    //！Step2.1:添加边缘化的残差
     if (last_marginalization_info)
     {
         // construct new marginlization_factor
@@ -729,14 +767,18 @@ void Estimator::optimization()
                                  last_marginalization_parameter_blocks);
     }
 
+    //！Step2.2:添加IMU的residual
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         int j = i + 1;
         if (pre_integrations[j]->sum_dt > 10.0)
             continue;
+        //！添加代价函数
         IMUFactor* imu_factor = new IMUFactor(pre_integrations[j]);
         problem.AddResidualBlock(imu_factor, NULL, para_Pose[i], para_SpeedBias[i], para_Pose[j], para_SpeedBias[j]);
     }
+
+    //！Step2.3:添加视觉的residual
     int f_m_cnt = 0;
     int feature_index = -1;
     for (auto &it_per_id : f_manager.feature)
@@ -747,8 +789,9 @@ void Estimator::optimization()
  
         ++feature_index;
 
+        //！得到观测到该特征点的首帧
         int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
-        
+        //！得到第一个特征点
         Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
         for (auto &it_per_frame : it_per_id.feature_per_frame)
@@ -758,6 +801,7 @@ void Estimator::optimization()
             {
                 continue;
             }
+            //！得到第二个特征点
             Vector3d pts_j = it_per_frame.point;
             ProjectionFactor *f = new ProjectionFactor(pts_i, pts_j);
             problem.AddResidualBlock(f, loss_function, para_Pose[imu_i], para_Pose[imu_j], para_Ex_Pose[0], para_Feature[feature_index]);
@@ -818,8 +862,8 @@ void Estimator::optimization()
     ROS_DEBUG("visual measurement count: %d", f_m_cnt);
     ROS_DEBUG("prepare for ceres: %f", t_prepare.toc());
 
+    //！设置求解器的属性
     ceres::Solver::Options options;
-
     options.linear_solver_type = ceres::DENSE_SCHUR;
     //options.num_threads = 2;
     options.trust_region_strategy_type = ceres::DOGLEG;
@@ -831,6 +875,8 @@ void Estimator::optimization()
         options.max_solver_time_in_seconds = SOLVER_TIME * 4.0 / 5.0;
     else
         options.max_solver_time_in_seconds = SOLVER_TIME;
+
+    //！求解problem
     TicToc t_solver;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);

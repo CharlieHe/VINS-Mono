@@ -32,6 +32,8 @@ ProjectionFactor::ProjectionFactor(const Eigen::Vector3d &_pts_i, const Eigen::V
  * @param  residuals  [description]
  * @param  jacobians  [description]
  * @return            [description]
+ *
+ * 这部分内容的推导可以参考注释文档的4.2相机测量误差
  */
 bool ProjectionFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
@@ -47,9 +49,10 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
 
     double inv_dep_i = parameters[3][0];
 
-    //！将(u_i,v_i)反投影到第j frame坐标系下
-    //！P'=Rcb''(Rj''(Ri(Rcb(P+t_cb)+t_i)-t_j)-t_cb)
+    //！将第i frame下的3D点转到第j frame坐标系下
+    //！转到归一化平面，得到归一化平面上点P
     Eigen::Vector3d pts_camera_i = pts_i / inv_dep_i;
+    //! P'=Rcb''(Rj''(Ri(Rcb P+t_i)-t_j)-t_cb)
     Eigen::Vector3d pts_imu_i = qic * pts_camera_i + tic;
     Eigen::Vector3d pts_w = Qi * pts_imu_i + Pi;
     Eigen::Vector3d pts_imu_j = Qj.inverse() * (pts_w - Pj);
@@ -73,13 +76,15 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
         Eigen::Matrix3d Rj = Qj.toRotationMatrix();
         Eigen::Matrix3d ric = qic.toRotationMatrix();
         Eigen::Matrix<double, 2, 3> reduce(2, 3);
-#ifdef UNIT_SPHERE_ERROR
+#ifdef  UNIT_SPHERE_ERROR
         double norm = pts_camera_j.norm();
         Eigen::Matrix3d norm_jaco;
         double x1, x2, x3;
+        //！反投影过来的点
         x1 = pts_camera_j(0);
         x2 = pts_camera_j(1);
         x3 = pts_camera_j(2);
+
         norm_jaco << 1.0 / norm - x1 * x1 / pow(norm, 3), - x1 * x2 / pow(norm, 3),            - x1 * x3 / pow(norm, 3),
                      - x1 * x2 / pow(norm, 3),            1.0 / norm - x2 * x2 / pow(norm, 3), - x2 * x3 / pow(norm, 3),
                      - x1 * x3 / pow(norm, 3),            - x2 * x3 / pow(norm, 3),            1.0 / norm - x3 * x3 / pow(norm, 3);
@@ -90,6 +95,7 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
 #endif
         reduce = sqrt_info * reduce;
 
+        //! 对[Pi,Ri]求偏导
         if (jacobians[0])
         {
             Eigen::Map<Eigen::Matrix<double, 2, 7, Eigen::RowMajor>> jacobian_pose_i(jacobians[0]);
@@ -102,6 +108,7 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
             jacobian_pose_i.rightCols<1>().setZero();
         }
 
+        //! 对[Pi+1,Ri+1]求偏导
         if (jacobians[1])
         {
             Eigen::Map<Eigen::Matrix<double, 2, 7, Eigen::RowMajor>> jacobian_pose_j(jacobians[1]);
@@ -113,6 +120,8 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
             jacobian_pose_j.leftCols<6>() = reduce * jaco_j;
             jacobian_pose_j.rightCols<1>().setZero();
         }
+
+        //! 对[t,r](外参)求偏导
         if (jacobians[2])
         {
             Eigen::Map<Eigen::Matrix<double, 2, 7, Eigen::RowMajor>> jacobian_ex_pose(jacobians[2]);
@@ -124,6 +133,8 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
             jacobian_ex_pose.leftCols<6>() = reduce * jaco_ex;
             jacobian_ex_pose.rightCols<1>().setZero();
         }
+
+        //! 对[Pi+1,Ri+1]求偏导
         if (jacobians[3])
         {
             Eigen::Map<Eigen::Vector2d> jacobian_feature(jacobians[3]);
@@ -194,7 +205,8 @@ void ProjectionFactor::check(double **parameters)
     puts("num");
     std::cout << residual.transpose() << std::endl;
 
-    //！这个地方是什么作用。。。。。，求了19次不同形式的残差
+    //！这个地方是什么作用。。。。。，求了19次不同形式的残差，每个状态量叠加三次扰动
+    //！给各个状态量加一个小扰动，然后计算残差
     const double eps = 1e-6;
     Eigen::Matrix<double, 2, 19> num_jacobian;
     for (int k = 0; k < 19; k++)

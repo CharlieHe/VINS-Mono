@@ -15,6 +15,7 @@ void Estimator::setParameter()
         ric[i] = RIC[i];
     }
     f_manager.setRic(ric);
+    //！设置相机测量误差的信息矩阵
     ProjectionFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
 }
 
@@ -130,7 +131,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     ROS_DEBUG("Adding feature points %lu", image.size());
 
     //! 基于视差来选择关键帧(经过旋转补偿)
-    //! 在滑窗内添加features，并确定要进行边缘化的方式？
+    //! 向Featuresmanger中添加Features并确定共视关系
     if (f_manager.addFeatureCheckParallax(frame_count, image))
         marginalization_flag = MARGIN_OLD;
     else
@@ -320,7 +321,7 @@ bool Estimator::initialStructure()
         cv::Mat r, rvec, t, D, tmp_r;
         if((frame_it->first) == Headers[i].stamp.toSec())
         {
-            //！一次性转换到相机坐标系下
+            //！一次性转换到IMU坐标系下
             frame_it->second.is_key_frame = true;
             frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();
             frame_it->second.T = T[i];
@@ -379,6 +380,7 @@ bool Estimator::initialStructure()
         MatrixXd T_pnp;
         cv::cv2eigen(t, T_pnp);
         T_pnp = R_pnp * (-T_pnp);
+        //！转换到IMU坐标系下
         frame_it->second.R = R_pnp * RIC[0].transpose();
         frame_it->second.T = T_pnp;
     }
@@ -472,7 +474,7 @@ bool Estimator::visualInitialAlign()
         it_per_id.estimated_depth *= s;
     }
 
-    //！显示部分
+    //！得到真实的pitch和roll
     Matrix3d R0 = Utility::g2R(g);
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
     R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
@@ -599,6 +601,9 @@ void Estimator::vector2double()
         para_Feature[i][0] = dep(i);
 }
 
+/**
+ * [Estimator::double2vector 提取滑窗内状态量并计算闭环帧的漂移]
+ */
 void Estimator::double2vector()
 {
     Vector3d origin_R0 = Utility::R2ypr(Rs[0]);
@@ -610,14 +615,19 @@ void Estimator::double2vector()
         origin_P0 = last_P0;
         failure_occur = 0;
     }
+
+    //！这个位子是没有经过优化的滑窗第一帧位姿
     Vector3d origin_R00 = Utility::R2ypr(Quaterniond(para_Pose[0][6],
                                                       para_Pose[0][3],
                                                       para_Pose[0][4],
                                                       para_Pose[0][5]).toRotationMatrix());
+
+    //！求取yaw的漂移，那么这个地方的漂移来自什么地方呢？
     double y_diff = origin_R0.x() - origin_R00.x();
     //TODO
     Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
 
+    //！提取滑窗内的所有状态量
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
 
@@ -649,6 +659,7 @@ void Estimator::double2vector()
                              para_Ex_Pose[i][5]).toRotationMatrix();
     }
 
+    //！
     VectorXd dep = f_manager.getDepthVector();
     for (int i = 0; i < f_manager.getFeatureCount(); i++)
         dep(i) = para_Feature[i][0];
@@ -660,10 +671,13 @@ void Estimator::double2vector()
             retrive_data_vector[i].relocalized = true;
         Matrix3d vio_loop_r;
         Vector3d vio_loop_t;
+        //！计算发生yaw角漂移之后的闭环帧位姿
         vio_loop_r = rot_diff * Quaterniond(retrive_data_vector[0].loop_pose[6], retrive_data_vector[0].loop_pose[3], retrive_data_vector[0].loop_pose[4], retrive_data_vector[0].loop_pose[5]).normalized().toRotationMatrix();
         vio_loop_t = rot_diff * Vector3d(retrive_data_vector[0].loop_pose[0] - para_Pose[0][0],
                                 retrive_data_vector[0].loop_pose[1] - para_Pose[0][1],
                                 retrive_data_vector[0].loop_pose[2] - para_Pose[0][2]) + origin_P0;
+
+        //！漂移之后的位姿差(平移量和yaw)
         Quaterniond vio_loop_q(vio_loop_r);
         double relocalize_yaw;
         relocalize_yaw = Utility::R2ypr(retrive_data_vector[0].R_old).x() - Utility::R2ypr(vio_loop_r).x();
@@ -775,6 +789,7 @@ void Estimator::optimization()
             continue;
         //！添加代价函数
         IMUFactor* imu_factor = new IMUFactor(pre_integrations[j]);
+        //！注意在添加残差的组成部分，由前后两帧的[p,q,v,b]组成，在计算雅克比的时候[p,q](7),[v,b](9)分开计算
         problem.AddResidualBlock(imu_factor, NULL, para_Pose[i], para_SpeedBias[i], para_Pose[j], para_SpeedBias[j]);
     }
 
@@ -809,14 +824,20 @@ void Estimator::optimization()
         }
     }
     relocalize = false;
+
+    //！添加闭环校正时候的状态量和残差
     //loop close factor
     if(LOOP_CLOSURE)
     {
         int loop_constraint_num = 0;
+        //！遍历Keyframe Dtabase
         for (int k = 0; k < (int)retrive_data_vector.size(); k++)
         {    
+            //！遍历滑窗内的Keyframe
             for(int i = 0; i < WINDOW_SIZE; i++)
             {
+                //！为什么这样就闭环成功了呢？这个地方通过时间戳就闭环了？
+                //！建立闭环约束
                 if(retrive_data_vector[k].header == Headers[i].stamp.toSec())
                 {
                     relocalize = true;
@@ -826,14 +847,18 @@ void Estimator::optimization()
                     loop_constraint_num++;
                     int retrive_feature_index = 0;
                     int feature_index = -1;
+
+                    //！遍历滑窗内的特征点
                     for (auto &it_per_id : f_manager.feature)
                     {
                         it_per_id.used_num = it_per_id.feature_per_frame.size();
+                        //！至少有两帧图像观测到该特征点且不是滑窗内的最后两帧
                         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
                             continue;
 
                         ++feature_index;
                         int start = it_per_id.start_frame;
+                        //！如果该Feature是被滑窗中本帧之前观测到
                         if(start <= i)
                         {   
                             while(retrive_data_vector[k].features_ids[retrive_feature_index] < it_per_id.feature_id)
@@ -841,6 +866,7 @@ void Estimator::optimization()
                                 retrive_feature_index++;
                             }
 
+                            //！将拥有固定位姿的闭环帧加入到Visual-Inertail BA中
                             if(retrive_data_vector[k].features_ids[retrive_feature_index] == it_per_id.feature_id)
                             {
                                 Vector3d pts_j = Vector3d(retrive_data_vector[k].measurements[retrive_feature_index].x, retrive_data_vector[k].measurements[retrive_feature_index].y, 1.0);
@@ -884,6 +910,7 @@ void Estimator::optimization()
     ROS_DEBUG("Iterations : %d", static_cast<int>(summary.iterations.size()));
     ROS_DEBUG("solver costs: %f", t_solver.toc());
 
+    //！求解两个闭环帧之间的关系
     // relative info between two loop frame
     if(LOOP_CLOSURE && relocalize)
     { 
@@ -891,19 +918,25 @@ void Estimator::optimization()
         {
             for(int i = 0; i< WINDOW_SIZE; i++)
             {
+                //！闭环检测成功
                 if(retrive_data_vector[k].header == Headers[i].stamp.toSec())
                 {
                     retrive_data_vector[k].relative_pose = true;
                     Matrix3d Rs_i = Quaterniond(para_Pose[i][6], para_Pose[i][3], para_Pose[i][4], para_Pose[i][5]).normalized().toRotationMatrix();
                     Vector3d Ps_i = Vector3d(para_Pose[i][0], para_Pose[i][1], para_Pose[i][2]);
+
+                    //！闭环帧的位姿
                     Quaterniond Qs_loop;
                     Qs_loop = Quaterniond(retrive_data_vector[k].loop_pose[6],  retrive_data_vector[k].loop_pose[3],  retrive_data_vector[k].loop_pose[4],  retrive_data_vector[k].loop_pose[5]).normalized().toRotationMatrix();
                     Matrix3d Rs_loop = Qs_loop.toRotationMatrix();
                     Vector3d Ps_loop = Vector3d( retrive_data_vector[k].loop_pose[0],  retrive_data_vector[k].loop_pose[1],  retrive_data_vector[k].loop_pose[2]);
 
+                    //！求匹配帧到闭环帧之间的相对位姿
                     retrive_data_vector[k].relative_t = Rs_loop.transpose() * (Ps_i - Ps_loop);
                     retrive_data_vector[k].relative_q = Rs_loop.transpose() * Rs_i;
+                    //！因为pitch和roll可观，所以仅考虑在yaw上的漂移
                     retrive_data_vector[k].relative_yaw = Utility::normalizeAngle(Utility::R2ypr(Rs_i).x() - Utility::R2ypr(Rs_loop).x());
+                    //！
                     if (abs(retrive_data_vector[k].relative_yaw) > 30.0 || retrive_data_vector[k].relative_t.norm() > 20.0)
                         retrive_data_vector[k].relative_pose = false;
                         

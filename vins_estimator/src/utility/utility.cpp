@@ -1,5 +1,6 @@
 #include "utility.h"
 
+//！得到对齐后的g与真值之间的旋转矩阵，并且将旋转中的yaw角给0
 Eigen::Matrix3d Utility::g2R(const Eigen::Vector3d &g)
 {
     Eigen::Matrix3d R0;

@@ -201,7 +201,7 @@ class IntegrationBase
     }
 
     /**
-     * [evaluate 计算两次预积分(两种Bias之下的？)状态的差值，以此来评估评估是否需要进行repropagate？]
+     * [evaluate 计算IMU测量模型的残差]
      * @param Pi，Qi，Vi，Bai，Bgi  [前一次预积分结果]
      * @param Pj，Qj，Vj，Baj，Bgj  [后一次预积分结果]
      */

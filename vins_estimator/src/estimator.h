@@ -21,6 +21,7 @@
 #include <queue>
 #include <opencv2/core/eigen.hpp>
 
+//！检索关键帧的数据结构
 struct RetriveData
 {
     /* data */
@@ -83,13 +84,14 @@ class Estimator
     MatrixXd Ap[2], backup_A;
     VectorXd bp[2], backup_b;
 
+    //！camera-->IMU
     Matrix3d ric[NUM_OF_CAM];
     Vector3d tic[NUM_OF_CAM];
 
+    //! local-->world
     Vector3d Ps[(WINDOW_SIZE + 1)];
     Vector3d Vs[(WINDOW_SIZE + 1)];
     
-    //! local-->world
     Matrix3d Rs[(WINDOW_SIZE + 1)];
     Vector3d Bas[(WINDOW_SIZE + 1)];
     Vector3d Bgs[(WINDOW_SIZE + 1)];
@@ -123,6 +125,7 @@ class Estimator
     double initial_timestamp;
 
 
+    //！stl vector形式的RS[i]转为数组形式
     double para_Pose[WINDOW_SIZE + 1][SIZE_POSE];
     double para_SpeedBias[WINDOW_SIZE + 1][SIZE_SPEEDBIAS];
     double para_Feature[NUM_OF_F][SIZE_FEATURE];
@@ -143,3 +146,24 @@ class Estimator
     IntegrationBase *tmp_pre_integration;
 
 };
+
+/**
+ **********声明***********
+ *  闭环帧：在Keyframe database中旧帧，匹配帧：在当前滑窗内的匹配帧
+ *  
+ *  LOOP_CLOSURE: 是否进行闭环检测
+ *  
+ *  retrive_data_vector:在processImage之后开始往Dtabase中添加数据
+ *  
+ *  image：某一帧图像得到的特征点，<Feature_id, <camera_id,Feature>>
+ *  
+ *  Headers: 滑窗内，每一帧Keyframe对应的帧头
+ *  
+ *  f_manager: 滑窗的特征管理器
+ *  
+ *  keyframe_database：关键帧集合，每次在闭环检测线程中增加新元素，每个关键帧在滑窗内的导数第二个位置时被添加。
+ *  
+ *  keyframe_buf：为闭环检测提供临时的Keyframe存储,中间只包含滑窗内的导数第二Keyframe，当其包含的某帧进入闭环检测环节会被弹出
+ *
+ * 
+ */

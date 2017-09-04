@@ -78,7 +78,8 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
         //sqrt_info.setIdentity();
         residual = sqrt_info * residual;
 
-        //！这里的雅克比矩阵作用是什么
+        //！求取优化过程中，DOGLEG求解部分用到的雅克比矩阵
+        //！这部分的推导详见注释文档4.1部分
         if (jacobians)
         {
             double sum_dt = pre_integration->sum_dt;
@@ -101,6 +102,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
             //！雅克比矩阵的秩和costfunction中参数块的大小是一致的
             //！J[i] 是一个大小为CostFunction::num_residuals_ x CostFunction::parameter_block_sizes_的向量
             //！详细参考：http://ceres-solver.org/nnls_modeling.html?highlight=set_num_residuals#_CPPv2N5ceres12CostFunction8EvaluateEPPCdPdPPd
+            //！求取[p_k,q_k]的雅克比
             if (jacobians[0])
             {
                 //！将jacobians[0]重新写为15*7的矩阵
@@ -128,6 +130,8 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
                     ROS_BREAK();
                 }
             }
+
+            //！求取[v_k,ba_k,bg_k]的雅克比
             if (jacobians[1])
             {
                 Eigen::Map<Eigen::Matrix<double, 15, 9, Eigen::RowMajor>> jacobian_speedbias_i(jacobians[1]);
@@ -156,6 +160,8 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
                 ROS_ASSERT(fabs(jacobian_speedbias_i.maxCoeff()) < 1e8);
                 ROS_ASSERT(fabs(jacobian_speedbias_i.minCoeff()) < 1e8);
             }
+
+            //！求取[p_k+1,q_k+1]的雅克比
             if (jacobians[2])
             {
                 Eigen::Map<Eigen::Matrix<double, 15, 7, Eigen::RowMajor>> jacobian_pose_j(jacobians[2]);
@@ -175,6 +181,8 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
                 ROS_ASSERT(fabs(jacobian_pose_j.maxCoeff()) < 1e8);
                 ROS_ASSERT(fabs(jacobian_pose_j.minCoeff()) < 1e8);
             }
+
+            //！求取[v_k+1,ba_k+1,bg_k+1]的雅克比
             if (jacobians[3])
             {
                 Eigen::Map<Eigen::Matrix<double, 15, 9, Eigen::RowMajor>> jacobian_speedbias_j(jacobians[3]);

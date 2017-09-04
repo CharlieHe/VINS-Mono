@@ -174,6 +174,12 @@ KeyFrame* KeyFrameDatabase::getLastKeyframe(int last_index)
     return *rit;
 }
 
+/**
+ * [KeyFrameDatabase::optimize4DoFLoopPoseGraph 4自由度的闭环位姿优化]
+ * @param cur_index      [description]
+ * @param loop_correct_t [description]
+ * @param loop_correct_r [description]
+ */
 void KeyFrameDatabase::optimize4DoFLoopPoseGraph(int cur_index, Eigen::Vector3d &loop_correct_t, Eigen::Matrix3d &loop_correct_r)
 {
 	ROS_DEBUG("optimizae pose graph begin!");
@@ -406,6 +412,10 @@ void KeyFrameDatabase::updateVisualization()
 	ROS_DEBUG("updateVisualization end");
 }
 
+/**
+ * [KeyFrameDatabase::addLoop 添加回环]
+ * @param loop_index [description]
+ */
 void KeyFrameDatabase::addLoop(int loop_index)
 {
 	unique_lock<mutex> lock(mPosegraphVisualization);

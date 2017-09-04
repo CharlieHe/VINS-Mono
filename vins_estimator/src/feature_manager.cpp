@@ -44,7 +44,7 @@ int FeatureManager::getFeatureCount()
 /**
  * [FeatureManager::addFeatureCheckParallax description]
  * @param  frame_count [滑窗内关键帧ID]
- * @param  image       [第ID帧Features]
+ * @param  image       [<Feature_id, <camera_id,Feature>>]
  * @return             [description]
  */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Vector3d>>> &image)
@@ -62,7 +62,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
         int feature_id = id_pts.first;
         auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
                           {
-            return it.feature_id == feature_id;
+                                return it.feature_id == feature_id;
                           });
 
         //! 如果该id对应的是feature列表中的最后一个feature，则用该id对应的feature替换列表中末尾的feature
@@ -204,7 +204,7 @@ void FeatureManager::clearDepth(const VectorXd &x)
 }
 
 /**
- * [FeatureManager::getDepthVector 读取特征点的深度值]
+ * [FeatureManager::getDepthVector 读取特征点的逆深度]
  * @return [description]
  */
 VectorXd FeatureManager::getDepthVector()

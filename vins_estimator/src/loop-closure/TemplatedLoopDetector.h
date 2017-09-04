@@ -612,6 +612,7 @@ TemplatedLoopDetector<TDescriptor, F>::TemplatedLoopDetector
 }
 
 // --------------------------------------------------------------------------
+//！获取相机的类型和校准模型
 template<class TDescriptor, class F>
 void TemplatedLoopDetector<TDescriptor, F>::initCameraModel(const std::string &calib_file)
 {

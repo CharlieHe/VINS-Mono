@@ -48,11 +48,12 @@ void KeyFrame::extractBrief(cv::Mat &image)
     BriefExtractor extractor(BRIEF_PATTERN_FILE);
     extractor(image, measurements, keypoints, descriptors);
 
-    //！将tracking过程中的强角点和其描述子加入到question(window怎么称呼)
+    //！将tracking过程中的强角点和其描述子加入到window中
+    //！question(window怎么称呼)
     int start = keypoints.size() - measurements.size();
     for(int i = 0; i< (int)measurements.size(); i++)
     {
-        //！这个window_keypoints就这个地方有用到，具体什么作用呢？？
+        //！加入的只有强角点的Features和descriptors
         window_keypoints.push_back(keypoints[start + i]);
         window_descriptors.push_back(descriptors[start + i]);
     }
@@ -153,7 +154,7 @@ bool KeyFrame::searchInAera(cv::Point2f center_cur, float area_size,
 /**
  * [KeyFrame::FundmantalMatrixRANSAC description]
  * @param measurements_old      [闭环帧和匹配帧之间的良好匹配点(闭环帧中)]
- * @param measurements_old_norm [description]
+ * @param measurements_old_norm [良好的匹配点在归一化平面的坐标]
  * @param m_camera              [description]
  */
 void KeyFrame::FundmantalMatrixRANSAC(vector<cv::Point2f> &measurements_old,
@@ -201,8 +202,8 @@ void KeyFrame::FundmantalMatrixRANSAC(vector<cv::Point2f> &measurements_old,
  * [KeyFrame::searchByDes 在闭环帧中寻找良好匹配点]
  * @param measurements_old      [description]
  * @param measurements_old_norm [description]
- * @param descriptors_old       [description]
- * @param keypoints_old         [description]
+ * @param descriptors_old       [闭环帧的描述子]
+ * @param keypoints_old         [闭环帧的关键点]
  * @param m_camera              [description]
  */
 void KeyFrame::searchByDes(std::vector<cv::Point2f> &measurements_old, 
@@ -289,7 +290,7 @@ void KeyFrame::PnPRANSAC(vector<cv::Point2f> &measurements_old,
         status[n] = 1;
     } 
 
-    //！将求得的相对位姿再转到IM坐标系下
+    //！将求得的相对位姿再转到IMU坐标系下
     cv::Rodrigues(rvec, r);
     Matrix3d R_pnp, R_w_c_old;
     cv::cv2eigen(r, R_pnp);
@@ -312,9 +313,9 @@ void KeyFrame::PnPRANSAC(vector<cv::Point2f> &measurements_old,
 
 /**
  * [KeyFrame::findConnectionWithOldFrame 计算闭环帧与当前帧的位姿关系和匹配关系]
- * @param  old_kf                [description]
- * @param  measurements_old      [description]
- * @param  measurements_old_norm [description]
+ * @param  old_kf                [闭环帧]
+ * @param  measurements_old      [闭环帧中良好的匹配点]
+ * @param  measurements_old_norm [闭环帧中良好的匹配点]
  * @param  PnP_T_old             [description]
  * @param  PnP_R_old             [description]
  * @param  m_camera              [description]
@@ -437,7 +438,9 @@ BriefExtractor::BriefExtractor(const std::string &pattern_file)
 
 /**
  * [BriefExtractor::operator 提取Fast角点和Brief描述子]
- * @param descriptors [description]
+ * @param descriptors [最终得到的描述子]
+ * @param window_pts  [tracking中的强角点]
+ * @param keys        [所有的KeyPints]
  */
 void BriefExtractor::operator() (const cv::Mat &im, const std::vector<cv::Point2f> window_pts,
                                  vector<cv::KeyPoint> &keys, vector<BRIEF::bitset> &descriptors) const

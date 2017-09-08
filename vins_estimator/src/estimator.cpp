@@ -131,7 +131,8 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     ROS_DEBUG("Adding feature points %lu", image.size());
 
     //! 基于视差来选择关键帧(经过旋转补偿)
-    //! 向Featuresmanger中添加Features并确定共视关系
+    //! 向Featuresmanger中添加Features并确定共视关系及视差角的大小
+    //! 以此来选择边缘化的方式
     if (f_manager.addFeatureCheckParallax(frame_count, image))
         marginalization_flag = MARGIN_OLD;
     else
@@ -171,6 +172,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
 
     if (solver_flag == INITIAL)
     {
+        //！滑窗中的Keyframe达到指定大小的时候，才开始优化
         if (frame_count == WINDOW_SIZE)
         {
             bool result = false;
@@ -764,7 +766,7 @@ void Estimator::optimization()
             problem.SetParameterBlockConstant(para_Ex_Pose[i]);
         }
         else
-            ROS_DEBUG("estimate extinsic param");
+            ROS_DEBUG("estimate extinsic param"); 
     }
 
     //！将优化量存入数组
@@ -830,7 +832,7 @@ void Estimator::optimization()
     if(LOOP_CLOSURE)
     {
         int loop_constraint_num = 0;
-        //！遍历Keyframe Dtabase
+        //！遍历闭环检测 database
         for (int k = 0; k < (int)retrive_data_vector.size(); k++)
         {    
             //！遍历滑窗内的Keyframe
@@ -910,6 +912,7 @@ void Estimator::optimization()
     ROS_DEBUG("Iterations : %d", static_cast<int>(summary.iterations.size()));
     ROS_DEBUG("solver costs: %f", t_solver.toc());
 
+    /*****************优化后的内容********************/
     //！求解两个闭环帧之间的关系
     // relative info between two loop frame
     if(LOOP_CLOSURE && relocalize)
@@ -947,23 +950,28 @@ void Estimator::optimization()
 
     double2vector();
 
+    //！开始边缘化
+    //！边缘化旧帧
     TicToc t_whole_marginalization;
     if (marginalization_flag == MARGIN_OLD)
     {
         MarginalizationInfo *marginalization_info = new MarginalizationInfo();
         vector2double();
 
+        //！如果上一次边缘化的信息存在
         if (last_marginalization_info)
         {
             vector<int> drop_set;
             for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)
             {
+                //！查询待估计参数中是首帧状态量的序号
                 if (last_marginalization_parameter_blocks[i] == para_Pose[0] ||
                     last_marginalization_parameter_blocks[i] == para_SpeedBias[0])
                     drop_set.push_back(i);
             }
             // construct new marginlization_factor
             MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
+            //！cost_function, loss_function, 待估计参数(last_marginalization_parameter_blocks, drop_set)
             ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(marginalization_factor, NULL,
                                                                            last_marginalization_parameter_blocks,
                                                                            drop_set);
@@ -971,6 +979,8 @@ void Estimator::optimization()
             marginalization_info->addResidualBlockInfo(residual_block_info);
         }
 
+        //！添加IMU的先验，只包含旧帧的IMU测量残差
+        //！Question：不应该是pre_integrations[0]么
         {
             if (pre_integrations[1]->sum_dt < 10.0)
             {
@@ -982,6 +992,7 @@ void Estimator::optimization()
             }
         }
 
+        //！添加视觉的先验，只有首帧和起始观测帧是首帧的Features
         {
             int feature_index = -1;
             for (auto &it_per_id : f_manager.feature)
@@ -993,6 +1004,8 @@ void Estimator::optimization()
                 ++feature_index;
 
                 int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
+               
+                //！只取被观测的起始帧是旧帧的Features
                 if (imu_i != 0)
                     continue;
 
@@ -1022,6 +1035,7 @@ void Estimator::optimization()
         marginalization_info->marginalize();
         ROS_DEBUG("marginalization %f ms", t_margin.toc());
 
+        //！将滑窗里关键帧位姿移位，为什么是向右移位了呢？
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i <= WINDOW_SIZE; i++)
         {
@@ -1039,6 +1053,8 @@ void Estimator::optimization()
         last_marginalization_parameter_blocks = parameter_blocks;
         
     }
+
+    //！边缘化倒数第二帧
     else
     {
         if (last_marginalization_info &&
@@ -1052,6 +1068,7 @@ void Estimator::optimization()
                 vector<int> drop_set;
                 for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)
                 {
+                    //！寻找导数第二帧的位姿
                     ROS_ASSERT(last_marginalization_parameter_blocks[i] != para_SpeedBias[WINDOW_SIZE - 1]);
                     if (last_marginalization_parameter_blocks[i] == para_Pose[WINDOW_SIZE - 1])
                         drop_set.push_back(i);

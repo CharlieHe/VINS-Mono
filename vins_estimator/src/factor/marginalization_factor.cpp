@@ -1,5 +1,8 @@
 #include "marginalization_factor.h"
 
+/**
+ * [ResidualBlockInfo::Evaluate description]
+ */
 void ResidualBlockInfo::Evaluate()
 {
     residuals.resize(cost_function->num_residuals());
@@ -86,27 +89,40 @@ MarginalizationInfo::~MarginalizationInfo()
     }
 }
 
+/**
+ * [MarginalizationInfo::addResidualBlockInfo 添加残差]
+ * @param residual_block_info (costfunction, lossfunction, parameter_blocks)
+ */
 void MarginalizationInfo::addResidualBlockInfo(ResidualBlockInfo *residual_block_info)
 {
     factors.emplace_back(residual_block_info);
 
+    //！residual_block_info->parameter_blocks = last_marginalization_parameter_blocks
     std::vector<double *> &parameter_blocks = residual_block_info->parameter_blocks;
+    //！Size of input parameter
     std::vector<int> parameter_block_sizes = residual_block_info->cost_function->parameter_block_sizes();
 
     for (int i = 0; i < static_cast<int>(residual_block_info->parameter_blocks.size()); i++)
     {
         double *addr = parameter_blocks[i];
         int size = parameter_block_sizes[i];
+
+        //！global size
         parameter_block_size[reinterpret_cast<long>(addr)] = size;
     }
 
     for (int i = 0; i < static_cast<int>(residual_block_info->drop_set.size()); i++)
     {
         double *addr = parameter_blocks[residual_block_info->drop_set[i]];
+
+        //！local size
         parameter_block_idx[reinterpret_cast<long>(addr)] = 0;
     }
 }
 
+/**
+ *  残差信息边缘化
+ */
 void MarginalizationInfo::preMarginalize()
 {
     for (auto it : factors)
@@ -318,6 +334,9 @@ std::vector<double *> MarginalizationInfo::getParameterBlocks(std::unordered_map
     return keep_block_addr;
 }
 
+/**
+ * @description     [边缘化残差]
+ */
 MarginalizationFactor::MarginalizationFactor(MarginalizationInfo* _marginalization_info):marginalization_info(_marginalization_info)
 {
     int cnt = 0;

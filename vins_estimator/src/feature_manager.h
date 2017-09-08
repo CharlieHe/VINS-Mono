@@ -39,6 +39,7 @@ class FeaturePerId
     const int feature_id;
     int start_frame;
     //！观测到该特征点的关键帧集合
+    //！该特征点被关键帧观测到的坐标集合
     vector<FeaturePerFrame> feature_per_frame;
 
     int used_num;
@@ -84,6 +85,7 @@ class FeatureManager
     void removeBack();
     void removeFront(int frame_count);
     void removeOutlier();
+    //！滑窗内所有特征点列表
     list<FeaturePerId> feature;
     int last_track_num;
 

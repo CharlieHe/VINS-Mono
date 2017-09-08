@@ -246,6 +246,7 @@ void send_imu(const sensor_msgs::ImuConstPtr &imu_msg)
  */
 void process_loop_detection()
 {
+    //！Step1：闭环检测模型初始化
     if(loop_closure == NULL)
     {
         const char *voc_file = VOC_FILE.c_str();
@@ -273,7 +274,7 @@ void process_loop_detection()
 
         if (cur_kf != NULL)
         {
-            //！将当前帧加入到关键帧序列中
+            //！Step2：将当前帧加入到关键帧序列中
             cur_kf->global_index = global_frame_cnt;
             m_keyframedatabase_resample.lock();
             keyframe_database.add(cur_kf);
@@ -287,12 +288,12 @@ void process_loop_detection()
             vector<cv::Point2f> cur_pts;
             vector<cv::Point2f> old_pts;
 
-            //！提取当前帧的Brief描述子
+            //！Step3：提取当前帧的Brief描述子(包括了另外500Fast角点的提取)
             TicToc t_brief;
             cur_kf->extractBrief(current_image);
             //printf("loop extract %d feature using %lf\n", cur_kf->keypoints.size(), t_brief.toc());
             
-            //！启动最底层的闭环检测程序
+            //！Step4：启动最底层的闭环检测程序，检测当前帧是否能够形成闭环
             TicToc t_loopdetect;
             /*
                 cur_pts，cur_pts：匹配的keypoints
@@ -305,7 +306,7 @@ void process_loop_detection()
             //！检测到闭环
             if(loop_succ)
             {
-                //！依据闭环帧的ID提取闭环帧
+                //！Step5：如果检测到闭环，则依据闭环帧的ID提取闭环帧
                 KeyFrame* old_kf = keyframe_database.getKeyframe(old_index);
                 if (old_kf == NULL)
                 {
@@ -315,7 +316,7 @@ void process_loop_detection()
                 ROS_DEBUG("loop succ %d with %drd image", global_frame_cnt, old_index);
                 assert(old_index!=-1);
                 
-                //！计算闭环帧和匹配帧之间的位姿关系和良好的匹配点
+                //！Step6：计算闭环帧和匹配帧之间的位姿关系和良好的匹配点
                 Vector3d T_w_i_old, PnP_T_old;
                 Matrix3d R_w_i_old, PnP_R_old;
 
@@ -328,7 +329,7 @@ void process_loop_detection()
                 measurements_cur = cur_kf->measurements_matched;
                 features_id_matched = cur_kf->features_id_matched;
                 
-                // send loop info to VINS relocalization
+                // Step7：存入闭环的信息
                 int loop_fusion = 0;
                 if( (int)measurements_old_norm.size() > MIN_LOOP_NUM && global_frame_cnt - old_index > 35 && old_index > 30)
                 {
@@ -337,6 +338,7 @@ void process_loop_detection()
                     RetriveData retrive_data;
                     retrive_data.cur_index = cur_kf->global_index;
                     retrive_data.header = cur_kf->header;
+                    //！存入闭环帧的信息
                     retrive_data.P_old = T_w_i_old;
                     retrive_data.R_old = R_w_i_old;
                     retrive_data.relative_pose = false;
@@ -353,6 +355,7 @@ void process_loop_detection()
                     m_retrive_data_buf.lock();
                     retrive_data_buf.push(retrive_data);
                     m_retrive_data_buf.unlock();
+                    //！加入当前帧的闭环帧信息
                     cur_kf->detectLoop(old_index);
                     old_kf->is_looped = 1;
                     loop_fusion = 1;
@@ -544,6 +547,7 @@ void process()
                 }
 
                 //! retrive_data_buf --> retrive_data_vector
+                //! 向闭环数据库中加入闭环信息
                 m_retrive_data_buf.lock();
                 while(!retrive_data_buf.empty())
                 {
@@ -571,7 +575,7 @@ void process()
                     
                     //！向Keyframe Database中添加关键帧
                     const char *pattern_file = PATTERN_FILE.c_str();
-                    //！经过闭环校正之后的位姿
+                    //！经过闭环校正之后
                     Vector3d cur_T;
                     Matrix3d cur_R;
                     cur_T = relocalize_r * vio_T_w_i + relocalize_t;
@@ -587,6 +591,7 @@ void process()
                     {
                         if(estimator.Headers[0].stamp.toSec() == estimator.retrive_data_vector[0].header)
                         {
+                            //！如果闭环帧和匹配帧之间相差太大，则移除该闭环
                             KeyFrame* cur_kf = keyframe_database.getKeyframe(estimator.retrive_data_vector[0].cur_index);                            
                             if (abs(estimator.retrive_data_vector[0].relative_yaw) > 30.0 || estimator.retrive_data_vector[0].relative_t.norm() > 20.0)
                             {

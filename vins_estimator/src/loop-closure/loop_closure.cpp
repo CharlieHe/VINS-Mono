@@ -20,6 +20,15 @@ void LoopClosure::initCameraModel(const std::string &calib_file)
       demo.initCameraModel(calib_file);
 }
 
+/**
+ * [LoopClosure::startLoopClosure 闭环检测启动程序]
+ * @param  keys        [关键点]
+ * @param  descriptors [描述子]
+ * @param  cur_pts     [description]
+ * @param  old_pts     [description]
+ * @param  old_index   [description]
+ * @return             [description]
+ */
 bool LoopClosure::startLoopClosure(std::vector<cv::KeyPoint> &keys, std::vector<BRIEF::bitset> &descriptors,
                                    std::vector<cv::Point2f> &cur_pts,
                                    std::vector<cv::Point2f> &old_pts,

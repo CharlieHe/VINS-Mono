@@ -65,14 +65,14 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
                                 return it.feature_id == feature_id;
                           });
 
-        //! 如果该id对应的是feature列表中的最后一个feature，则用该id对应的feature替换列表中末尾的feature
+        //! 如果该Feature不在Features列表中，则将<Feature,Start_frame>存入到Feature列表中
         if (it == feature.end())
         {
             feature.push_back(FeaturePerId(feature_id, frame_count));
             feature.back().feature_per_frame.push_back(f_per_fra);
         }
 
-        //! 如果该feature不是列表中的最后一个，则将跟踪次数加1
+        //! 如果该Feature之前被观测到过
         else if (it->feature_id == feature_id)
         {
             it->feature_per_frame.push_back(f_per_fra);
@@ -84,10 +84,10 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     if (frame_count < 2 || last_track_num < 20)
         return true;
 
-    //! 
+    //! 计算共视关系
     for (auto &it_per_id : feature)
     {
-        //! 如果该Feature不属于滑窗的导数两帧
+        //! 至少有两帧观测到该特征点
         if (it_per_id.start_frame <= frame_count - 2 &&
             it_per_id.start_frame + int(it_per_id.feature_per_frame.size()) - 1 >= frame_count - 1)
         {
@@ -95,11 +95,12 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
             parallax_num++;
         }
     }
-
+    //！Question：这个地方怎么理解？
     if (parallax_num == 0)
     {
         return true;
     }
+    //！视差大于某个阈值
     else
     {
         ROS_DEBUG("parallax_sum: %lf, parallax_num: %d", parallax_sum, parallax_num);
@@ -411,6 +412,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     //int r_i = frame_count - 2;
     //int r_j = frame_count - 1;
     //p_i_comp = ric[camera_id_j].transpose() * Rs[r_j].transpose() * Rs[r_i] * ric[camera_id_i] * p_i;
+    //！这两个有区别么。。。
     p_i_comp = p_i;
     double dep_i = p_i(2);
     double u_i = p_i(0) / dep_i;
@@ -422,6 +424,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     double v_i_comp = p_i_comp(1) / dep_i_comp;
     double du_comp = u_i_comp - u_j, dv_comp = v_i_comp - v_j;
 
+    //！取x,y方向上偏移最小的一个
     ans = max(ans, sqrt(min(du * du + dv * dv, du_comp * du_comp + dv_comp * dv_comp)));
 
     return ans;

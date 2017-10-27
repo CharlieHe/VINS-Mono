@@ -55,6 +55,8 @@ class FeatureTracker
     vector<cv::Point2f> n_pts;
     //! 和图像image同理,cur_pts：上一帧特征点，forw_pts是当前帧特征点
     vector<cv::Point2f> prev_pts, cur_pts, forw_pts;
+
+    //! 每个Feature的跟踪次数
     vector<int> ids;
     vector<int> track_cnt;
     camodocal::CameraPtr m_camera;

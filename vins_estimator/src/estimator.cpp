@@ -147,7 +147,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     //! 分别将读到的features和imu_mea加入到各自的序列当中。
     ImageFrame imageframe(image, header.stamp.toSec());
     imageframe.pre_integration = tmp_pre_integration;
-    all_image_frame.insert(make_pair(header.stamp.transposec(), imageframe));
+    all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe));
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
 
     if(ESTIMATE_EXTRINSIC == 2)

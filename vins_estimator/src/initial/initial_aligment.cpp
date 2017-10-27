@@ -181,7 +181,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 
     MatrixXd A{n_state, n_state};
     A.setZero();
-    VectorXd b{n_state};d
+    VectorXd b{n_state};
     b.setZero();
 
     map<double, ImageFrame>::iterator frame_i;

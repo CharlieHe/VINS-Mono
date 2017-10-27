@@ -258,6 +258,7 @@ bool FeatureTracker::updateID(unsigned int i)
 {
     if (i < ids.size())
     {
+        //! 新提取的Feature
         if (ids[i] == -1)
             ids[i] = n_id++;
         return true;

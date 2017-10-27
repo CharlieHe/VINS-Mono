@@ -54,8 +54,11 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     double parallax_sum = 0;
     int parallax_num = 0;
     last_track_num = 0;
+
+    //! 迭代单个特征点
     for (auto &id_pts : image)
     {
+        //! 特征点坐标
         FeaturePerFrame f_per_fra(id_pts.second[0].second);
 
         //! 在feature列表中寻找id为feature_id的feature
@@ -65,7 +68,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
                                 return it.feature_id == feature_id;
                           });
 
-        //! 如果该Feature不在Features列表中，则将<Feature,Start_frame>存入到Feature列表中
+        //! 如果该Feature不在Features列表中，则将<FeatureID,Start_frame>存入到Feature列表中
         if (it == feature.end())
         {
             feature.push_back(FeaturePerId(feature_id, frame_count));

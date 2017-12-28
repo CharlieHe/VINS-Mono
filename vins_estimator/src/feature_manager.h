@@ -15,6 +15,7 @@ using namespace Eigen;
 
 #include "parameters.h"
 
+//! Feature在某个图像帧下的坐标（归一化平面坐标）
 class FeaturePerFrame
 {
   public:

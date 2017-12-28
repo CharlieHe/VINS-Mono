@@ -487,7 +487,7 @@ PinholeCamera::liftSphere(const Eigen::Vector2d& p, Eigen::Vector3d& P) const
  * \param P coordinates of the projective ray
  */
 /**
- * [PinholeCamera::liftProjective 将图像平面的像素点投影到相机归一化平面上]
+ * [PinholeCamera::liftProjective 将图像平面的像素点投影到相机归一化平面上，进行畸变矫正]
  * @param p [像素点]
  * @param P [归一化平面的3D点]
  */
@@ -545,6 +545,9 @@ void PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P)
             int n = 8;
             Eigen::Vector2d d_u;
             distortion(Eigen::Vector2d(mx_d, my_d), d_u);
+
+            //! 归一化平面上的点减去畸变量是什么鬼
+            //! 得到畸变前的点
             // Approximate value
             mx_u = mx_d - d_u(0);
             my_u = my_d - d_u(1);
@@ -699,7 +702,7 @@ void PinholeCamera::undistToPlane(const Eigen::Vector2d& p_u, Eigen::Vector2d& p
 
 /**
  * \brief Apply distortion to input point (from the normalised plane)
- *
+ *     对输入点进行畸变
  * \param p_u undistorted coordinates of point on the normalised plane
  * \return to obtain the distorted point: p_d = p_u + d_u
  */

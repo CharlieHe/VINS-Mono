@@ -12,7 +12,7 @@ InitialEXRotation::InitialEXRotation(){
  * [InitialEXRotation::CalibrationExRotation 通过一组匹配点和IMU的预积分结果，计算相机与IMU的外参的旋转量
  *                           这部分内容可以参考代码总结中3.1部分，相机与IMU的相对旋转求取
  *                           或者参考论文Monocular Visual–Inertial State Estimation With Online Initialization and Camera–IMU Extrinsic Calibration
- *                           公式(12)部分]
+ *                           V.A 部分]
  * @param  corres           [一组匹配的特征点]
  * @param  delta_q_imu      [IMU预积分出的旋转量]
  * @param  calib_ric_result [Camera与IMU的外参之旋转量]

@@ -12,6 +12,7 @@
 
 const int NUM_THREADS = 4;
 
+//! 边缘化残差的构造函数
 struct ResidualBlockInfo
 {
     ResidualBlockInfo(ceres::CostFunction *_cost_function, ceres::LossFunction *_loss_function, std::vector<double *> _parameter_blocks, std::vector<int> _drop_set)
@@ -56,7 +57,7 @@ class MarginalizationInfo
 
     std::vector<ResidualBlockInfo *> factors;
     int m, n;
-    std::unordered_map<long, int> parameter_block_size; //global size
+    std::unordered_map<long, int> parameter_block_size; //global size <地址，大小>
     int sum_block_size;
     std::unordered_map<long, int> parameter_block_idx; //local size
     std::unordered_map<long, double *> parameter_block_data;

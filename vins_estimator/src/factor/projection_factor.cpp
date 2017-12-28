@@ -37,6 +37,7 @@ ProjectionFactor::ProjectionFactor(const Eigen::Vector3d &_pts_i, const Eigen::V
  */
 bool ProjectionFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
+    //! 参考h文件，总共有4个参数块，其大小分别是<7, 7, 7, 1>
     TicToc tic_toc;
     Eigen::Vector3d Pi(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Qi(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
@@ -70,6 +71,7 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
 
     residual = sqrt_info * residual;
 
+    //! 因为残差是2， 四个参数快对应的雅克比矩阵分别是：2*7， 2*7, 2*7， 2*1
     if (jacobians)
     {
         Eigen::Matrix3d Ri = Qi.toRotationMatrix();

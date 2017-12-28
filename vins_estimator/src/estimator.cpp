@@ -74,7 +74,7 @@ void Estimator::clearState()
 
 /**
  * [Estimator::processIMU description]
- * @param dt                  [description]
+ * @param dt                  [两次IMU测量的时间间隔]
  * @param linear_acceleration [description]
  * @param angular_velocity    [description]
  */
@@ -87,17 +87,17 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
         gyr_0 = angular_velocity;
     }
 
-    //! 加入预积分滑窗内的第一帧IMU数据
+    //! 当滑窗不满的时候，把当前测量值加入到滑窗指定位置，所以在这个阶段做预计分的时候相当于是在和自己做预计分
     if (!pre_integrations[frame_count])
     {
         pre_integrations[frame_count] = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
     }
 
-    //! 
+    //! 进入预计分环节
     if (frame_count != 0)
     {
         
-        //! 添加IMU数据，进行预积分
+        //! 添加IMU数据，进行预积分  Prei-Second
         pre_integrations[frame_count]->push_back(dt, linear_acceleration, angular_velocity);
         //if(solver_flag != NON_LINEAR)
         tmp_pre_integration->push_back(dt, linear_acceleration, angular_velocity);
@@ -106,7 +106,7 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
         linear_acceleration_buf[frame_count].push_back(linear_acceleration);
         angular_velocity_buf[frame_count].push_back(angular_velocity);
 
-        //! 这个地方又拿IMU的数据做了一次积分
+        //! 这个地方又拿IMU的数据做了一次积分, Prei-Third，更新估计器内系统的位姿
         int j = frame_count;         
         Vector3d un_acc_0 = Rs[j] * (acc_0 - Bas[j]) - g;
         Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs[j];
@@ -150,6 +150,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe));
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
 
+    //! 把这部分代码放到后面的初始化的代码中，是不是更合理一些
     if(ESTIMATE_EXTRINSIC == 2)
     {
         ROS_INFO("calibrating extrinsic param, rotation movement is needed");
@@ -170,6 +171,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
         }
     }
 
+    //! 初始化
     if (solver_flag == INITIAL)
     {
         //！滑窗中的Keyframe达到指定大小的时候，才开始优化
@@ -773,7 +775,6 @@ void Estimator::optimization()
     TicToc t_whole, t_prepare;
     vector2double();
 
-    //！Step2：添加误差项
     //！Step2.1:添加边缘化的残差
     if (last_marginalization_info)
     {
@@ -827,6 +828,7 @@ void Estimator::optimization()
     }
     relocalize = false;
 
+    //！Step2.3:添加视觉的residual
     //！添加闭环校正时候的状态量和残差
     //loop close factor
     if(LOOP_CLOSURE)
@@ -950,7 +952,7 @@ void Estimator::optimization()
 
     double2vector();
 
-    //！开始边缘化
+    //！Step3：构造边缘化的Problem
     //！边缘化旧帧
     TicToc t_whole_marginalization;
     if (marginalization_flag == MARGIN_OLD)
@@ -958,7 +960,9 @@ void Estimator::optimization()
         MarginalizationInfo *marginalization_info = new MarginalizationInfo();
         vector2double();
 
-        //！如果上一次边缘化的信息存在
+        //! 先验误差会一直保存，而不是只使用一次
+        //! 如果上一次边缘化的信息存在
+        //! 要边缘化的参数块是 para_Pose[0] para_SpeedBias[0] 以及 para_Feature[feature_index](滑窗内的第feature_index个点)
         if (last_marginalization_info)
         {
             vector<int> drop_set;
@@ -969,8 +973,12 @@ void Estimator::optimization()
                     last_marginalization_parameter_blocks[i] == para_SpeedBias[0])
                     drop_set.push_back(i);
             }
+
+            //! 构造边缘化的的Factor
             // construct new marginlization_factor
             MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
+
+            //! 添加上一次边缘化的参数块
             //！cost_function, loss_function, 待估计参数(last_marginalization_parameter_blocks, drop_set)
             ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(marginalization_factor, NULL,
                                                                            last_marginalization_parameter_blocks,
@@ -981,6 +989,7 @@ void Estimator::optimization()
 
         //！添加IMU的先验，只包含旧帧的IMU测量残差
         //！Question：不应该是pre_integrations[0]么
+        //!
         {
             if (pre_integrations[1]->sum_dt < 10.0)
             {
@@ -992,12 +1001,15 @@ void Estimator::optimization()
             }
         }
 
-        //！添加视觉的先验，只有首帧和起始观测帧是首帧的Features
+        //！添加视觉的先验，只添加起始帧是旧帧且观测次数大于2的Features
         {
             int feature_index = -1;
+            //! 遍历滑窗内所有的Features
             for (auto &it_per_id : f_manager.feature)
             {
+                //! 该特征点被观测到的次数
                 it_per_id.used_num = it_per_id.feature_per_frame.size();
+                //! Feature的观测次数不小于2次，且起始帧不属于最后两帧
                 if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
                     continue;
 
@@ -1005,15 +1017,17 @@ void Estimator::optimization()
 
                 int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
                
-                //！只取被观测的起始帧是旧帧的Features
+                //! 只选择起始帧为旧帧的Features
                 if (imu_i != 0)
                     continue;
 
+                //! 得到该Feature在旧帧下的归一化坐标
                 Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
                 for (auto &it_per_frame : it_per_id.feature_per_frame)
                 {
                     imu_j++;
+                    //! 不需要其实观测帧
                     if (imu_i == imu_j)
                         continue;
 
@@ -1027,15 +1041,18 @@ void Estimator::optimization()
             }
         }
 
+        //! 将三个ResidualBlockInfo中的参数块综合到marginalization_info中
         TicToc t_pre_margin;
         marginalization_info->preMarginalize();
         ROS_DEBUG("pre marginalization %f ms", t_pre_margin.toc());
-        
+
+        //!
         TicToc t_margin;
         marginalization_info->marginalize();
         ROS_DEBUG("marginalization %f ms", t_margin.toc());
 
         //！将滑窗里关键帧位姿移位，为什么是向右移位了呢？
+        //! 这里是保存了所有状态量的信息
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i <= WINDOW_SIZE; i++)
         {

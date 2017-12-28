@@ -46,6 +46,8 @@ int FeatureManager::getFeatureCount()
  * @param  frame_count [滑窗内关键帧ID]
  * @param  image       [<Feature_id, <camera_id,Feature>>]
  * @return             [description]
+ *  需要注意的是，在前段的Feature_tracking部分，对所有的Features都进行了编号
+ *  关于视差的判断，并没有看到关于角度的补偿，或者是在后面边缘化的具体过程中存在角度的补偿
  */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Vector3d>>> &image)
 {
@@ -58,7 +60,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     //! 迭代单个特征点
     for (auto &id_pts : image)
     {
-        //! 特征点坐标
+        //! 特征点的归一化坐标
         FeaturePerFrame f_per_fra(id_pts.second[0].second);
 
         //! 在feature列表中寻找id为feature_id的feature
@@ -83,14 +85,16 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
         }
     }
 
-    //! 如果滑窗内的关键帧的个数小于2或者跟踪次数小于20
+    //! 如果滑窗内的关键帧的个数小于2或者总共被跟踪到的次数小于20
+    //! Question: 这个地方和跟踪丢失了，怎么区分
     if (frame_count < 2 || last_track_num < 20)
         return true;
 
-    //! 计算共视关系
+    //! 计算共视关系， parallax_num为满足要求的Feature的个数
     for (auto &it_per_id : feature)
     {
-        //! 至少有两帧观测到该特征点
+        //! 至少有两帧观测到该特征点(起始帧要小于倒数第二帧，终止帧要大于倒数第二帧，这样至少有三帧观测到该Feature(包括当前帧))
+        //! 然后比较观测到该faeature的倒数第二帧和倒数第三帧的视差
         if (it_per_id.start_frame <= frame_count - 2 &&
             it_per_id.start_frame + int(it_per_id.feature_per_frame.size()) - 1 >= frame_count - 1)
         {
@@ -103,7 +107,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     {
         return true;
     }
-    //！视差大于某个阈值
+    //！平均视差视差要大于某个阈值, MIN_PARALLAX=10，大约是10个像素点
     else
     {
         ROS_DEBUG("parallax_sum: %lf, parallax_num: %d", parallax_sum, parallax_num);
@@ -370,6 +374,11 @@ void FeatureManager::removeBack()
     }
 }
 
+/**
+ *  根据滑窗的移动，不断剔除Feature中由该帧观测到的Feature的坐标，当这个坐标vector为空的的时候，就将这个Feature剔除
+ *  若是feature的第一帧，则向后移即可。
+ * @param frame_count
+ */
 void FeatureManager::removeFront(int frame_count)
 {
     for (auto it = feature.begin(), it_next = feature.begin(); it != feature.end(); it = it_next)
@@ -391,7 +400,8 @@ void FeatureManager::removeFront(int frame_count)
 }
 
 /**
- * [FeatureManager::compensatedParallax2 description]
+ * [FeatureManager::compensatedParallax2 判断该特征点观测帧的倒数第二帧和导数第三帧的共视关系
+ *                                       实际是求取该特征点在两帧的归一化平面上的坐标点的距离]
  * @param  it_per_id   [description]
  * @param  frame_count [description]
  * @return             [description]
@@ -403,6 +413,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     const FeaturePerFrame &frame_i = it_per_id.feature_per_frame[frame_count - 2 - it_per_id.start_frame];
     const FeaturePerFrame &frame_j = it_per_id.feature_per_frame[frame_count - 1 - it_per_id.start_frame];
 
+    //! Step2: 求取该Feature在两帧下的归一化平面坐标
     double ans = 0;
     Vector3d p_j = frame_j.point;
 
@@ -415,8 +426,9 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     //int r_i = frame_count - 2;
     //int r_j = frame_count - 1;
     //p_i_comp = ric[camera_id_j].transpose() * Rs[r_j].transpose() * Rs[r_i] * ric[camera_id_i] * p_i;
-    //！这两个有区别么。。。
+    //！这个地方本来就是归一化平面上的点啊
     p_i_comp = p_i;
+
     double dep_i = p_i(2);
     double u_i = p_i(0) / dep_i;
     double v_i = p_i(1) / dep_i;

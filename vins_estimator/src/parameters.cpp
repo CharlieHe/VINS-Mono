@@ -47,14 +47,16 @@ T readParam(ros::NodeHandle &n, std::string name)
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;
-    config_file = readParam<std::string>(n, "config_file");
+    //config_file = readParam<std::string>(n, "config_file");
+    config_file = "config/euroc/euroc_config.yaml";
     cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
     }
 
-    VINS_FOLDER_PATH = readParam<std::string>(n, "vins_folder");
+    //VINS_FOLDER_PATH = readParam<std::string>(n, "vins_folder");
+    VINS_FOLDER_PATH = "config/";
     fsSettings["image_topic"] >> IMAGE_TOPIC;
     fsSettings["imu_topic"] >> IMU_TOPIC;
 

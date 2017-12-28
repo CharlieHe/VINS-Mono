@@ -140,7 +140,7 @@ class Estimator
     Matrix3d relocalize_r;
 
     MarginalizationInfo *last_marginalization_info;
-    vector<double *> last_marginalization_parameter_blocks;
+    vector<double *> last_marginalization_parameter_blocks;         //! 边缘化的参数快
 
     map<double, ImageFrame> all_image_frame;
     IntegrationBase *tmp_pre_integration;

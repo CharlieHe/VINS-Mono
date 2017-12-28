@@ -22,6 +22,7 @@ Estimator estimator;
 
 std::condition_variable con;
 double current_time = -1;
+//! 先进先出
 queue<sensor_msgs::ImuConstPtr> imu_buf;
 queue<sensor_msgs::PointCloudConstPtr> feature_buf;
 std::mutex m_posegraph_buf;
@@ -126,12 +127,20 @@ std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointC
 {
     std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> measurements;
 
+    //! 只有以下情况符合添加measurements的要求
+    /*
+    /*     [-----IMU-----]
+    /*     |add |
+    /*     |add[|--Ftature--]
+    /*  只有标记了add的IMU数据和Feature_buf中的最后一个Feature才会被加入到measurements中
+    */
+    //! imu_buf的数据在imu_callback()中已经加入
     while (true)
     {
         if (imu_buf.empty() || feature_buf.empty())
             return measurements;
 
-        //! 如果最新的IMU的数据时间戳小于特征点的时间戳，则等待IMU刷新
+        //! 如果最新的IMU的数据时间戳小于最旧特征点的时间戳，则等待IMU刷新
         if (!(imu_buf.back()->header.stamp > feature_buf.front()->header.stamp))
         {
             ROS_WARN("wait for imu, only should happen at the beginning");
@@ -177,6 +186,9 @@ void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
     con.notify_one();
     {
         std::lock_guard<std::mutex> lg(m_state);
+
+        //! 这个地方积分是为了提高系统位姿的输出频率
+        //Prei-First
         predict(imu_msg);
         std_msgs::Header header = imu_msg->header;
         header.frame_id = "world";
@@ -500,7 +512,7 @@ void process()
         std::unique_lock<std::mutex> lk(m_buf);
         con.wait(lk, [&]
                  {
-            return (measurements = getMeasurements()).size() != 0;
+                    return (measurements = getMeasurements()).size() != 0;
                  });
         lk.unlock();
 
@@ -510,10 +522,18 @@ void process()
             for (auto &imu_msg : measurement.first)
                 send_imu(imu_msg);
 
+            //! img_msg = sensor_msgs::PointCloud
+            /*
+             *      sensor_msgs/PointCloud:
+             *          std_msgs/Header header
+             *          geometry_msgs/Point32[] points
+             *          sensor_msgs/ChannelFloat32[] channels
+             */
             auto img_msg = measurement.second;
             ROS_DEBUG("processing vision data with stamp %f \n", img_msg->header.stamp.toSec());
 
             TicToc t_s;
+            //! 这里存的是归一化平面上的点
             map<int, vector<pair<int, Vector3d>>> image;
             for (unsigned int i = 0; i < img_msg->points.size(); i++)
             {
@@ -580,6 +600,8 @@ void process()
                     Matrix3d cur_R;
                     cur_T = relocalize_r * vio_T_w_i + relocalize_t;
                     cur_R = relocalize_r * vio_R_w_i;
+
+                    //! 构造新的关键帧，
                     KeyFrame* keyframe = new KeyFrame(estimator.Headers[WINDOW_SIZE - 2].stamp.toSec(), vio_T_w_i, vio_R_w_i, cur_T, cur_R, image_buf.front().first, pattern_file);
                     keyframe->setExtrinsic(estimator.tic[0], estimator.ric[0]);
                     keyframe->buildKeyFrameFeatures(estimator, m_camera);

@@ -124,7 +124,7 @@ void MarginalizationInfo::addResidualBlockInfo(ResidualBlockInfo *residual_block
         parameter_block_size[reinterpret_cast<long>(addr)] = size;
     }
 
-    //! 存入要边缘化参数块的地址
+    //! 存入要边缘化参数块的地址，在首次边缘化的时候parameter_block_idx的大小为2+要边缘化的Features：
     for (int i = 0; i < static_cast<int>(residual_block_info->drop_set.size()); i++)
     {
         double *addr = parameter_blocks[residual_block_info->drop_set[i]];
@@ -226,15 +226,17 @@ void MarginalizationInfo::marginalize()
 {
     //! Step1：计算drop_set参数块的大小，即要边缘化的参数块总的大小
     int pos = 0;
+    int tNum = 0;
     for (auto &it : parameter_block_idx)
     {
         //! 把parameter_block_idx的value全部置为0
         it.second = pos;
         pos += localSize(parameter_block_size[it.first]);
+        tNum++;
     }
 
     m = pos;
-
+    int tNum1 =0;
     //! Step2：重新计算parameter_block_idx的Value 值(实际为边缘化参数的序号)
     for (const auto &it : parameter_block_size)
     {
@@ -242,8 +244,10 @@ void MarginalizationInfo::marginalize()
         {
             parameter_block_idx[it.first] = pos;
             pos += localSize(it.second);
+            tNum1++;
         }
     }
+    //! Question： 这里两个for循环求得的pos应该是相等的啊
 
     n = pos - m;
 

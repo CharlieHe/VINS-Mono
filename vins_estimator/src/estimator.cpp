@@ -962,7 +962,7 @@ void Estimator::optimization()
 
         //! 先验误差会一直保存，而不是只使用一次
         //! 如果上一次边缘化的信息存在
-        //! 要边缘化的参数块是 para_Pose[0] para_SpeedBias[0] 以及 para_Feature[feature_index](滑窗内的第feature_index个点)
+        //! 要边缘化的参数块是 para_Pose[0] para_SpeedBias[0] 以及 para_Feature[feature_index](滑窗内的第feature_index个点的逆深度)
         if (last_marginalization_info)
         {
             vector<int> drop_set;

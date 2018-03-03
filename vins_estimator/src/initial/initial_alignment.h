@@ -17,9 +17,11 @@ class ImageFrame
         ImageFrame(const map<int, vector<pair<int, Vector3d>>>& _points, double _t):points{_points},t{_t},is_key_frame{false}
         {
         };
+
+        //! <Feature_id, <Camera_id, 归一化点>>
         map<int, vector<pair<int, Vector3d> > > points;
         double t;
-        Matrix3d R;
+        Matrix3d R;     //! 在IMU坐标系下的位姿  IMU ==> world
         Vector3d T;
         IntegrationBase *pre_integration;
         bool is_key_frame;

@@ -36,8 +36,10 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         tmp_A.setZero();
         VectorXd tmp_b(3);
         tmp_b.setZero();
+
         //！对应公式(2)的右侧
-        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);        
+        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
+        
         tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
         //！对应公式(3)的右侧
         tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
@@ -77,7 +79,7 @@ MatrixXd TangentBasis(Vector3d &g0)
     if(a == tmp)
         tmp << 1, 0, 0;
 
-    //！question：这个叉乘为什么搞得这么费劲
+    //！question：这个叉乘为什么搞得这么费劲，这个地方应该是a×tmp
     b = (tmp - a * (a.transpose() * tmp)).normalized();
     c = a.cross(b);
     MatrixXd bc(3, 2);
@@ -96,6 +98,7 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
 {
     Vector3d g0 = g.normalized() * G.norm();
     Vector3d lx, ly;
+
     //VectorXd x;
     int all_frame_count = all_image_frame.size();
     int n_state = all_frame_count * 3 + 2 + 1;
@@ -126,7 +129,6 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
 
 
             tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
-            //！少的一列向量
             tmp_A.block<3, 2>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity() * lxly;
             tmp_A.block<3, 1>(0, 8) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;     
             tmp_b.block<3, 1>(0, 0) = frame_j->second.pre_integration->delta_p + frame_i->second.R.transpose() * frame_j->second.R * TIC[0] - TIC[0] - frame_i->second.R.transpose() * dt * dt / 2 * g0;
@@ -154,13 +156,14 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
             A.block<6, 3>(i * 3, n_state - 3) += r_A.topRightCorner<6, 3>();
             A.block<3, 6>(n_state - 3, i * 3) += r_A.bottomLeftCorner<3, 6>();
         }
+        //! 这里求解的是重力向量的变化量，求解的是w1,w2
             A = A * 1000.0;
             b = b * 1000.0;
             x = A.ldlt().solve(b);
             VectorXd dg = x.segment<2>(n_state - 3);
             g0 = (g0 + lxly * dg).normalized() * G.norm();
             //double s = x(n_state - 1);
-    }   
+    }   //! 这里也没有给出收敛的条件，怎么保证迭代是正确的。
     g = g0;
 }
 
@@ -176,7 +179,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 {
     int all_frame_count = all_image_frame.size();
 
-    //！状态量的个数[V1,V2....Vn,g,s]
+    //！状态量的个数[v1,v2....Vn,g,s]
     int n_state = all_frame_count * 3 + 3 + 1;
 
     MatrixXd A{n_state, n_state};
@@ -204,6 +207,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         tmp_A.block<3, 1>(0, 9) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;     
         tmp_b.block<3, 1>(0, 0) = frame_j->second.pre_integration->delta_p + frame_i->second.R.transpose() * frame_j->second.R * TIC[0] - TIC[0];
         //cout << "delta_p   " << frame_j->second.pre_integration->delta_p.transpose() << endl;
+
         tmp_A.block<3, 3>(3, 0) = -Matrix3d::Identity();
         tmp_A.block<3, 3>(3, 3) = frame_i->second.R.transpose() * frame_j->second.R;
         tmp_A.block<3, 3>(3, 6) = frame_i->second.R.transpose() * dt * Matrix3d::Identity();
@@ -249,6 +253,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 
     //！细化重力向量
     RefineGravity(all_image_frame, g, x);
+
     //！重新提取重力向量
     s = (x.tail<1>())(0) / 100.0;
     (x.tail<1>())(0) = s;
@@ -267,7 +272,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
  * @param  all_image_frame [包含图像特征和IMU预积分的集合]
  * @param  Bgs             [陀螺仪bias]
  * @param  g               [重力向量]
- * @param  x               [description]
+ * @param  x               [尺度因子]
  * @return                 [description]
  */
 bool VisualIMUAlignment(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)

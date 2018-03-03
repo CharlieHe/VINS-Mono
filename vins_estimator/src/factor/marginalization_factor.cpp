@@ -13,7 +13,7 @@ void ResidualBlockInfo::Evaluate()
     raw_jacobians = new double *[block_sizes.size()];
     jacobians.resize(block_sizes.size());
 
-    //! 分陪每一行的大小
+    //! 分配每一行的大小
     for (int i = 0; i < static_cast<int>(block_sizes.size()); i++)
     {
         jacobians[i].resize(cost_function->num_residuals(), block_sizes[i]);
@@ -224,7 +224,8 @@ void* ThreadsConstructA(void* threadsstruct)
 //! 边缘化主程序
 void MarginalizationInfo::marginalize()
 {
-    //! Step1：计算drop_set参数块的大小，即要边缘化的参数块总的大小
+    //! Step1：计算drop_set参数块的大小，即要边缘化的参数块总的大小，
+
     int pos = 0;
     int tNum = 0;
     for (auto &it : parameter_block_idx)
@@ -237,7 +238,8 @@ void MarginalizationInfo::marginalize()
 
     m = pos;
     int tNum1 =0;
-    //! Step2：重新计算parameter_block_idx的Value 值(实际为边缘化参数的序号)
+    //! Step2：计算除了边缘化之外要保留的参数块
+    //! 在parameter_block_idx先存入要被保留参数的index
     for (const auto &it : parameter_block_size)
     {
         if (parameter_block_idx.find(it.first) == parameter_block_idx.end())
@@ -247,7 +249,7 @@ void MarginalizationInfo::marginalize()
             tNum1++;
         }
     }
-    //! Question： 这里两个for循环求得的pos应该是相等的啊
+
 
     n = pos - m;
 
@@ -327,8 +329,13 @@ void MarginalizationInfo::marginalize()
 
 
     //TODO
+    //! 这里是在求解Amm的伪逆，但是不太理解
     //! Amm = 0.5*(A+A')   B = A.block(0, 0, m, m)
     Eigen::MatrixXd Amm = 0.5 * (A.block(0, 0, m, m) + A.block(0, 0, m, m).transpose());
+
+    std::cout << A.block(0, 0, m, m) << std::endl;
+    std::cout << Amm << std::endl;
+
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
 
     //ROS_ASSERT_MSG(saes.eigenvalues().minCoeff() >= -1e-4, "min eigenvalue %f", saes.eigenvalues().minCoeff());
@@ -341,9 +348,9 @@ void MarginalizationInfo::marginalize()
     //!    设x_{m}为要被marg掉的状态量，x_{r}是与x_{m}相关的状态量，所以在最后我们要保存的是x_{r}的信息
     //!
     //!      |      |    |          |   |
-    //!      |  Amm | Amr|          |bmm|        |x_{m}|
+    //!      |  Amm | Amr|  m       |bmm|        |x_{m}|
     //!  A = |______|____|      b = |__ |       A|x_{r}| = b
-    //!      |  Arm | Arr|          |brr|
+    //!      |  Arm | Arr|  n       |brr|
     //!      |      |    |          |   |
     //!  使用舒尔补:
     //!  C = Arr - Arm*Amm^{-1}Amr
@@ -356,6 +363,7 @@ void MarginalizationInfo::marginalize()
     A = Arr - Arm * Amm_inv * Amr;
     b = brr - Arm * Amm_inv * bmm;
 
+    //! Question: 下面的这些步骤算是在线性化残差和雅克比矩阵么，所谓的雅克比矩阵固定
     //! 求取A矩阵的特征值和特征值的倒数
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(A);
     Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
@@ -379,7 +387,7 @@ void MarginalizationInfo::marginalize()
     //      (linearized_jacobians.transpose() * linearized_residuals - b).sum());
 }
 
-//! 转存所有的参数块
+//! 转存边缘化之后需要保留的参数块
 std::vector<double *> MarginalizationInfo::getParameterBlocks(std::unordered_map<long, double *> &addr_shift)
 {
     std::vector<double *> keep_block_addr;
@@ -415,7 +423,7 @@ MarginalizationFactor::MarginalizationFactor(MarginalizationInfo* _marginalizati
         cnt += it;
     }
     //printf("residual size: %d, %d\n", cnt, n);
-    //! 设置残差的维数
+    //! 设置上一次边缘化保留的参数块的大小
     set_num_residuals(marginalization_info->n);
 };
 
@@ -433,15 +441,22 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
     int m = marginalization_info->m;
     Eigen::VectorXd dx(n);
 
-    //! 本次边缘化所有的参数块
+    //! 遍历本次边缘化保留下的参数块
     for (int i = 0; i < static_cast<int>(marginalization_info->keep_block_size.size()); i++)
     {
+        //! 得到该参数块的大小和序号
         int size = marginalization_info->keep_block_size[i];
         int idx = marginalization_info->keep_block_idx[i] - m;
+
         Eigen::VectorXd x = Eigen::Map<const Eigen::VectorXd>(parameters[i], size);
         Eigen::VectorXd x0 = Eigen::Map<const Eigen::VectorXd>(marginalization_info->keep_block_data[i], size);
+
+        //! 这里求解对应okvis中式(19)中的△x，如果使用李群的表达的话可以这样写？？？
+        //! 这里求取得dx是优化前后的残差？ 这个残差可以这样求？
+        //! 使用李代数的表达方式
         if (size != 7)
             dx.segment(idx, size) = x - x0;
+        //! 使用四元数的表达方式
         else
         {
             dx.segment<3>(idx + 0) = x.head<3>() - x0.head<3>();
@@ -453,7 +468,10 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
         }
     }
 
+    //! 计算残差，参考okvis的式(20)
     Eigen::Map<Eigen::VectorXd>(residuals, n) = marginalization_info->linearized_residuals + marginalization_info->linearized_jacobians * dx;
+
+    //! 仅在边缘化残差这一块，雅克比矩阵要固定？
     if (jacobians)
     {
 

@@ -88,7 +88,7 @@ class Estimator
     Matrix3d ric[NUM_OF_CAM];
     Vector3d tic[NUM_OF_CAM];
 
-    //! local-->world
+    //! local-->world  (IMU系下)
     Vector3d Ps[(WINDOW_SIZE + 1)];
     Vector3d Vs[(WINDOW_SIZE + 1)];
     
@@ -98,6 +98,8 @@ class Estimator
 
     Matrix3d back_R0, last_R, last_R0;
     Vector3d back_P0, last_P, last_P0;
+
+    //! 滑窗内11个帧的帧头
     std_msgs::Header Headers[(WINDOW_SIZE + 1)];
 
     IntegrationBase *pre_integrations[(WINDOW_SIZE + 1)];
@@ -142,6 +144,7 @@ class Estimator
     MarginalizationInfo *last_marginalization_info;
     vector<double *> last_marginalization_parameter_blocks;         //! 边缘化的参数快
 
+    //! <时间戳，单张图像归一化特征点集合以及当前时刻IMU预计分信息>
     map<double, ImageFrame> all_image_frame;
     IntegrationBase *tmp_pre_integration;
 

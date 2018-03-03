@@ -25,6 +25,7 @@ void FeatureManager::clearState()
     feature.clear();
 }
 
+//! 获取滑窗内满足要求的特征点的个数
 int FeatureManager::getFeatureCount()
 {
     int cnt = 0;
@@ -164,6 +165,7 @@ vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_coun
     return corres;
 }
 
+//! 初步设置特征点的深度值
 void FeatureManager::setDepth(const VectorXd &x)
 {
     int feature_index = -1;
@@ -217,8 +219,10 @@ void FeatureManager::clearDepth(const VectorXd &x)
  */
 VectorXd FeatureManager::getDepthVector()
 {
+    //! 深度向量
     VectorXd dep_vec(getFeatureCount());
     int feature_index = -1;
+
     for (auto &it_per_id : feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -236,7 +240,7 @@ VectorXd FeatureManager::getDepthVector()
 /**
  * [FeatureManager::triangulate 三角化没有恢复出深度的特征点]
  * @param Ps  [description]
- * @param tic [description]
+ * @param tic [description]     相机 ==> IMU
  * @param ric [description]
  * 1.将所有的frame转到同一个frame之下。
  * 2.进行三角化的剩余步骤。
@@ -253,28 +257,36 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
             continue;
         int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
 
+        //! Ax=0
         ROS_ASSERT(NUM_OF_CAM == 1);
         Eigen::MatrixXd svd_A(2 * it_per_id.feature_per_frame.size(), 4);
         int svd_idx = 0;
 
+        //! 设点相机矩阵,Camera系： imu_i ==> 0
         Eigen::Matrix<double, 3, 4> P0;
         Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];
         Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
         P0.leftCols<3>() = Eigen::Matrix3d::Identity();
         P0.rightCols<1>() = Eigen::Vector3d::Zero();
 
+        //! 集合多次观测
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
             imu_j++;
 
-            //！将坐标都转到Frame[imu_i]的坐标系下
+            //！ imu_j ==> 0
             Eigen::Vector3d t1 = Ps[imu_j] + Rs[imu_j] * tic[0];
             Eigen::Matrix3d R1 = Rs[imu_j] * ric[0];
+
+            //! imu_j ==> imu_i
             Eigen::Vector3d t = R0.transpose() * (t1 - t0);
             Eigen::Matrix3d R = R0.transpose() * R1;
+
+            //! imu_i ==> imu_j  (世界到cam)
             Eigen::Matrix<double, 3, 4> P;
             P.leftCols<3>() = R.transpose();
             P.rightCols<1>() = -R.transpose() * t;
+
             Eigen::Vector3d f = it_per_frame.point.normalized();
             svd_A.row(svd_idx++) = f[0] * P.row(2) - f[2] * P.row(0);
             svd_A.row(svd_idx++) = f[1] * P.row(2) - f[2] * P.row(1);
@@ -356,6 +368,7 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
     }
 }
 
+//! 移除旧帧的时候，滑窗内Features的变化
 void FeatureManager::removeBack()
 {
     for (auto it = feature.begin(), it_next = feature.begin();
@@ -423,6 +436,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     Vector3d p_i = frame_i.point;
     Vector3d p_i_comp;
 
+    //! 运动补偿
     //int r_i = frame_count - 2;
     //int r_j = frame_count - 1;
     //p_i_comp = ric[camera_id_j].transpose() * Rs[r_j].transpose() * Rs[r_i] * ric[camera_id_i] * p_i;

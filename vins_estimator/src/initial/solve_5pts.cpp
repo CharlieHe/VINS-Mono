@@ -27,6 +27,17 @@ namespace cv {
         t.copyTo(_t);
     }
 
+    /**
+     *   从本质矩阵中恢复出变换矩阵
+     * @param E
+     * @param _points1
+     * @param _points2
+     * @param _cameraMatrix
+     * @param _R
+     * @param _t
+     * @param _mask 求解本质矩阵时得到的内外点的标志位
+     * @return
+     */
     int recoverPose( InputArray E, InputArray _points1, InputArray _points2, InputArray _cameraMatrix,
                          OutputArray _R, OutputArray _t, InputOutputArray _mask)
     {
@@ -36,6 +47,7 @@ namespace cv {
         _points2.getMat().convertTo(points2, CV_64F);
         _cameraMatrix.getMat().convertTo(cameraMatrix, CV_64F);
 
+        //! 确保两组Features的大小是一致的
         int npoints = points1.checkVector(2);
         CV_Assert( npoints >= 0 && points2.checkVector(2) == npoints &&
                                   points1.type() == points2.type());
@@ -53,14 +65,17 @@ namespace cv {
         double cx = cameraMatrix.at<double>(0,2);
         double cy = cameraMatrix.at<double>(1,2);
 
+        //! 转归一化平面 n*2
         points1.col(0) = (points1.col(0) - cx) / fx;
         points2.col(0) = (points2.col(0) - cx) / fx;
         points1.col(1) = (points1.col(1) - cy) / fy;
         points2.col(1) = (points2.col(1) - cy) / fy;
 
+        //! 2*n
         points1 = points1.t();
         points2 = points2.t();
 
+        //! 分解本质矩阵E，得到可能的4组解
         Mat R1, R2, t;
         decomposeEssentialMat(E, R1, R2, t);
         Mat P0 = Mat::eye(3, 4, R1.type());
@@ -75,6 +90,8 @@ namespace cv {
         // out far away points (i.e. infinite points) since
         // there depth may vary between postive and negtive.
         double dist = 50.0;
+
+        //! 统计3D点在两个坐标系下深度值大于0，小于50的个数
         Mat Q;
         triangulatePoints(P0, P1, points1, points2, Q);
         Mat mask1 = Q.row(2).mul(Q.row(3)) > 0;
@@ -126,6 +143,7 @@ namespace cv {
         mask4 = mask4.t();
 
         // If _mask is given, then use it to filter outliers.
+        //! 剔除外点
         if (!_mask.empty())
         {
             Mat mask = _mask.getMat();
@@ -144,6 +162,7 @@ namespace cv {
         _R.create(3, 3, R1.type());
         _t.create(3, 1, t.type());
 
+        //! 统计符合要求的3D点的个数
         int good1 = countNonZero(mask1);
         int good2 = countNonZero(mask2);
         int good3 = countNonZero(mask3);
@@ -219,14 +238,15 @@ bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &co
 
         Eigen::Matrix3d R;
         Eigen::Vector3d T;
-        //! Mat转Eigen
+
+        //! 得到变换矩阵 ll ==> rr
         for (int i = 0; i < 3; i++)
         {   
             T(i) = trans.at<double>(i, 0);
             for (int j = 0; j < 3; j++)
                 R(i, j) = rot.at<double>(i, j);
         }
-        //! Step4：得到旋转矩阵和平移量
+        //! Step4：得到旋转矩阵和平移量 rr ==> ll
         Rotation = R.transpose();
         Translation = -R.transpose() * T;
         //! 判断求取的内点个数是否满足要求

@@ -12,7 +12,7 @@ using namespace Eigen;
 using namespace std;
 
 
-//! SFM中的特征点
+//! SFM中的单个特征点
 struct SFMFeature
 {
     bool state;
@@ -74,6 +74,6 @@ private:
 	void triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Pose0, 
 							  int frame1, Eigen::Matrix<double, 3, 4> &Pose1,
 							  vector<SFMFeature> &sfm_f);
-
+    //! 滑窗内特征点的个数
 	int feature_num;
 };

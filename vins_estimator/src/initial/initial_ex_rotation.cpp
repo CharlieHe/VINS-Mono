@@ -14,7 +14,7 @@ InitialEXRotation::InitialEXRotation(){
  *                           或者参考论文Monocular Visual–Inertial State Estimation With Online Initialization and Camera–IMU Extrinsic Calibration
  *                           V.A 部分]
  * @param  corres           [一组匹配的特征点]
- * @param  delta_q_imu      [IMU预积分出的旋转量]
+ * @param  delta_q_imu      k ==> k+1
  * @param  calib_ric_result [Camera与IMU的外参之旋转量]
  * @return                  [description]
  */
@@ -67,7 +67,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     }
 
     //！Step6：通过SVD分解，求取相机与IMU的相对旋转
-    //！解为系数矩阵A的右奇异向量V的最小奇异值对应的特征向量
+    //！解为系数矩阵A的右奇异向量V中最小奇异值对应的特征向量
     JacobiSVD<MatrixXd> svd(A, ComputeFullU | ComputeFullV);
     Matrix<double, 4, 1> x = svd.matrixV().col(3);
     Quaterniond estimated_R(x);
@@ -89,7 +89,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
 }
 
 /**
- * [InitialEXRotation::solveRelativeR 通过一组匹配点求解出两帧之间的旋转]
+ * [InitialEXRotation::solveRelativeR 通过一组匹配点求解出两帧之间的旋转, 求解出的是前帧到后帧的变换]
  * @param  corres [匹配点]
  * @return        [description]
  */
@@ -124,18 +124,20 @@ Matrix3d InitialEXRotation::solveRelativeR(const vector<pair<Vector3d, Vector3d>
         double ratio2 = max(testTriangulation(ll, rr, R2, t1), testTriangulation(ll, rr, R2, t2));
         cv::Mat_<double> ans_R_cv = ratio1 > ratio2 ? R1 : R2;
 
+        //! 这个地方对旋转矩阵做了一次转置
         Matrix3d ans_R_eigen;
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 3; j++)
                 ans_R_eigen(j, i) = ans_R_cv(i, j);
+
         return ans_R_eigen;
     }
     return Matrix3d::Identity();
 }
 
 /**
- * [InitialEXRotation::testTriangulation 计算由三角化恢复之后的3D点满足正确重构关系的比例，
- *                         可以看错是对该R|t的一个评分]
+ * [InitialEXRotation::testTriangulation 计算由三角化恢复之后的3D点满足正确重构关系的比例
+ *                         可以看做是对该R|t的一个评分]
  * @param  l [description]
  * @param  r [description]
  * @param  R [description]
@@ -147,13 +149,16 @@ double InitialEXRotation::testTriangulation(const vector<cv::Point2f> &l,
                                           cv::Mat_<double> R, cv::Mat_<double> t)
 {
     cv::Mat pointcloud;
+    //! 相机矩阵
     cv::Matx34f P = cv::Matx34f(1, 0, 0, 0,
                                 0, 1, 0, 0,
                                 0, 0, 1, 0);
+    //! 变换矩阵
     cv::Matx34f P1 = cv::Matx34f(R(0, 0), R(0, 1), R(0, 2), t(0),
                                  R(1, 0), R(1, 1), R(1, 2), t(1),
                                  R(2, 0), R(2, 1), R(2, 2), t(2));
-    //! 三角化恢复出3D点
+
+    //! 三角化恢复出3D点，三角化之后的点在l下
     cv::triangulatePoints(P, P1, l, r, pointcloud);
     int front_count = 0;
 

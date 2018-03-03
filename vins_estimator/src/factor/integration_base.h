@@ -325,7 +325,8 @@ class IntegrationBase
             covariance = F * covariance * F.transpose() + V * noise * V.transpose();
         }
 
-    }     
+    }
+
 
 
     void checkJacobian(double _dt, const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0, 

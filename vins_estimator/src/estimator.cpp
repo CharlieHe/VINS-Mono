@@ -134,9 +134,9 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     //! 向Featuresmanger中添加Features并确定共视关系及视差角的大小
     //! 以此来选择边缘化的方式
     if (f_manager.addFeatureCheckParallax(frame_count, image))
-        marginalization_flag = MARGIN_OLD;
+        marginalization_flag = MARGIN_OLD;              // Keyframe
     else
-        marginalization_flag = MARGIN_SECOND_NEW;
+        marginalization_flag = MARGIN_SECOND_NEW;       //Non-Keyframe
 
     ROS_DEBUG("this frame is--------------------%s", marginalization_flag ? "reject" : "accept");
     ROS_DEBUG("%s", marginalization_flag ? "Non-keyframe" : "Keyframe");
@@ -272,13 +272,15 @@ bool Estimator::initialStructure()
         }
     }
 
-    //！滑窗内全局的SFM
+    //！Step2：滑窗内全局的SFM
     // global sfm
     //！存入 global sfm用到的Features
     Quaterniond Q[frame_count + 1];
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
     vector<SFMFeature> sfm_f;
+
+    //! Step2.1:遍历滑窗内所有的Features，以vector<SFMFeature>, SFMFeature: <vector<pair<int,Vector2d>>形式保存滑窗内所有特征点
     for (auto &it_per_id : f_manager.feature)
     {
         int imu_j = it_per_id.start_frame - 1;
@@ -292,19 +294,22 @@ bool Estimator::initialStructure()
             tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));
         }
         sfm_f.push_back(tmp_feature);
-    } 
+    }
+
     Matrix3d relative_R;
     Vector3d relative_T;
     int l;
 
-    //! 求取滑窗内最新关键帧与满足共视要求的关键帧之间的变换矩阵
+    //! Step2.2 求取滑窗内与当前帧共视关系较强的关键帧，来三角化滑窗内的3D点
+    //! T:  当前帧到共视帧  now ===> l
     if (!relativePose(relative_R, relative_T, l))
     {
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
+
     GlobalSFM sfm;
-    //! 三角化恢复滑窗内的Features
+    //! Step2.3 三角化恢复滑窗内的Features
     if(!sfm.construct(frame_count + 1, Q, T, l,
               relative_R, relative_T,
               sfm_f, sfm_tracked_points))
@@ -327,6 +332,8 @@ bool Estimator::initialStructure()
         {
             //！一次性转换到IMU坐标系下
             frame_it->second.is_key_frame = true;
+
+            //! Question: 这里为什么要对R_{bc}做转置
             frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();
             frame_it->second.T = T[i];
             i++;
@@ -337,15 +344,19 @@ bool Estimator::initialStructure()
             i++;
         }
 
+        //! 将滑窗内第i帧的变换矩阵当做初始值
         Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
         Vector3d P_inital = - R_inital * T[i];
         cv::eigen2cv(R_inital, tmp_r);
         cv::Rodrigues(tmp_r, rvec);
         cv::eigen2cv(P_inital, t);
 
+        //! 如果这部分位姿不作为关键帧的化，求解出来就没有意义啊
         frame_it->second.is_key_frame = false;
         vector<cv::Point3f> pts_3_vector;
         vector<cv::Point2f> pts_2_vector;
+
+        //! 遍历该帧的所有Features
         for (auto &id_pts : frame_it->second.points)
         {
             int feature_id = id_pts.first;
@@ -377,6 +388,7 @@ bool Estimator::initialStructure()
             ROS_DEBUG("solve pnp fail!");
             return false;
         }
+        //! PnP求解出的位姿要取逆
         cv::Rodrigues(rvec, r);
         MatrixXd R_pnp,tmp_R_pnp;
         cv::cv2eigen(r, tmp_R_pnp);
@@ -409,7 +421,9 @@ bool Estimator::visualInitialAlign()
 {
     TicToc t_g;
     VectorXd x;
-    //solve scale
+
+    //! Step1 视觉与IMU对齐
+    //! 要注意这个地方求解出的g是在C0坐标系下
     bool result = VisualIMUAlignment(all_image_frame, Bgs, g, x);
     if(!result)
     {
@@ -419,7 +433,7 @@ bool Estimator::visualInitialAlign()
 
 /********后面这部分代码需要重新注释**********************************/    
 
-    //！替换滑窗内相机位姿的旧值
+    //！替换滑窗内相机位姿的旧值，并将滑窗内的视觉帧全部设为关键帧
     // change state
     for (int i = 0; i <= frame_count; i++)
     {
@@ -430,13 +444,13 @@ bool Estimator::visualInitialAlign()
         all_image_frame[Headers[i].stamp.toSec()].is_key_frame = true;
     }
 
-    //！设定指定Features的深度值
+    //! Step2: 将滑窗内Features的逆深度都设为1
     VectorXd dep = f_manager.getDepthVector();
     for (int i = 0; i < dep.size(); i++)
         dep[i] = -1;
     f_manager.clearDepth(dep);
 
-    //！
+    //！Step3：根据滑窗内关键帧位姿，三角化特征点，得到不具有尺度的深度值
     //triangulat on cam pose , no tic
     Vector3d TIC_TMP[NUM_OF_CAM];
     for(int i = 0; i < NUM_OF_CAM; i++)
@@ -445,20 +459,21 @@ bool Estimator::visualInitialAlign()
     f_manager.setRic(ric);
     f_manager.triangulate(Ps, &(TIC_TMP[0]), &(RIC[0]));
 
-    //！根据初始化得到的陀螺仪Bias，在滑窗内重新做一次预积分。
-    //！question：在得到Bias之后就做了一次，为什么这个地方还要做一次
+    //! Step4: 根据初始化得到的陀螺仪Bias，在滑窗内重新做一次预积分。
+    //！question：在得到Bias之后就做了一次，为什么这个地方还要做一次，上一次是所有帧
     double s = (x.tail<1>())(0);
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
         pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);
     }
 
-    //！求滑窗内其他Frame以第一帧为参考系下的坐标
+    //! Step5: 求滑窗内其他Frame以第一帧为参考系下的坐标
+    //! Question: 这个地方的计算是怎么做的
     for (int i = frame_count; i >= 0; i--)
         Ps[i] = s * Ps[i] - Rs[i] * TIC[0] - (s * Ps[0] - Rs[0] * TIC[0]);
     int kv = -1;
 
-    //！得到滑窗内关键帧的速度
+    //! Step6: 得到滑窗内关键帧的速度
     map<double, ImageFrame>::iterator frame_i;
     for (frame_i = all_image_frame.begin(); frame_i != all_image_frame.end(); frame_i++)
     {
@@ -469,7 +484,7 @@ bool Estimator::visualInitialAlign()
         }
     }
 
-    //！得到滑窗内Features对应的特征点
+    //! Step7: 为滑窗内特征点的深度值加上尺度
     for (auto &it_per_id : f_manager.feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -478,11 +493,15 @@ bool Estimator::visualInitialAlign()
         it_per_id.estimated_depth *= s;
     }
 
-    //！得到真实的pitch和roll
+    //! Step8: 得到真实的pitch和roll，纠正pitch和roll
+    //! 得到wqc0，并且使yaw轴为0
     Matrix3d R0 = Utility::g2R(g);
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
     R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
+    //! 将重力g转到后面的世界坐标系下
     g = R0 * g;
+
+    //! 同理，将滑窗内的状态量转到世界坐标系下
     //Matrix3d rot_diff = R0 * Rs[0].transpose();
     Matrix3d rot_diff = R0;
     for (int i = 0; i <= frame_count; i++)
@@ -498,9 +517,9 @@ bool Estimator::visualInitialAlign()
 }
 
 /**
- * [Estimator::relativePose 在滑窗中寻找与最新的关键帧共视关系最强的关键帧]
+ * [Estimator::relativePose 在滑窗中寻找与最新的关键帧共视关系较强的关键帧]
  * @param  relative_R [description]
- * @param  relative_T [description]
+ * @param  relative_T [description]  window_size ==> i
  * @param  l          [description]
  * @return            [description]
  */
@@ -518,7 +537,7 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
             double sum_parallax = 0;
             double average_parallax;
 
-            //! 求取匹配的特征点在图像上的视差和(单位为像素点)
+            //! 求取匹配的特征点在图像上的视差和(归一化平面上)
             for (int j = 0; j < int(corres.size()); j++)
             {
                 Vector2d pts_0(corres[j].first(0), corres[j].first(1));
@@ -809,7 +828,8 @@ void Estimator::optimization()
 
         //！得到观测到该特征点的首帧
         int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
-        //！得到第一个特征点
+
+        //！得到首帧观测到的特征点
         Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
         for (auto &it_per_frame : it_per_id.feature_per_frame)
@@ -1018,16 +1038,20 @@ void Estimator::optimization()
                 int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
                
                 //! 只选择起始帧为旧帧的Features
+                //! 这里不对啊，论文中讲的是只要Features被旧帧观测了就要被marg掉的啊
+                //! 这里是合适的，因为只要
+
                 if (imu_i != 0)
                     continue;
 
-                //! 得到该Feature在旧帧下的归一化坐标
+                //! 得到该Feature在起始下的归一化坐标
                 Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
                 for (auto &it_per_frame : it_per_id.feature_per_frame)
                 {
                     imu_j++;
-                    //! 不需要其实观测帧
+
+                    //! 不需要起始观测帧
                     if (imu_i == imu_j)
                         continue;
 
@@ -1052,7 +1076,7 @@ void Estimator::optimization()
         ROS_DEBUG("marginalization %f ms", t_margin.toc());
 
         //！将滑窗里关键帧位姿移位，为什么是向右移位了呢？
-        //! 这里是保存了所有状态量的信息
+        //! 这里是保存了所有状态量的信息，为什么没有保存逆深度的状态量呢
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i <= WINDOW_SIZE; i++)
         {

@@ -537,7 +537,7 @@ void process()
             map<int, vector<pair<int, Vector3d>>> image;
             for (unsigned int i = 0; i < img_msg->points.size(); i++)
             {
-                //! 
+                //! 归一化平面上的点
                 int v = img_msg->channels[0].values[i] + 0.5;
                 int feature_id = v / NUM_OF_CAM;
                 int camera_id = v % NUM_OF_CAM;
